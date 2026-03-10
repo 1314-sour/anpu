@@ -1,0 +1,12 @@
+<svg width="400" height="200" xmlns="http://www.w3.org/2000/svg">
+  <rect width="400" height="200" fill="#f0f0f0" stroke="#333" stroke-width="2"/>
+  <rect x="150" y="20" width="200" height="80" fill="white" stroke="#666" stroke-width="1" rx="5"/>
+  <text x="250" y="50" font-family="Arial" font-size="12" fill="#333" text-anchor="middle">SN:20012106122</text>
+  <text x="250" y="70" font-family="Arial" font-size="12" fill="#333" text-anchor="middle">验证码:5XZHA</text>
+  <circle cx="320" cy="60" r="20" fill="#FFD700"/>
+  <text x="200" y="130" font-family="Arial" font-size="14" fill="#666" text-anchor="middle">网关设备示意图</text>
+  <rect x="50" y="160" width="60" height="30" fill="#4CAF50" stroke="#2E7D32" stroke-width="1"/>
+  <text x="80" y="180" font-family="Arial" font-size="10" fill="white" text-anchor="middle">DC24V</text>
+  <rect x="120" y="160" width="60" height="30" fill="#2196F3" stroke="#1565C0" stroke-width="1"/>
+  <text x="150" y="180" font-family="Arial" font-size="10" fill="white" text-anchor="middle">RS485</text>
+</svg>
