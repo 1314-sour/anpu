@@ -1,26 +1,18 @@
-from fastapi import APIRouter, Security, HTTPException, status
+from fastapi import APIRouter, Security, HTTPException, status, Body
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel
 from typing import Dict, Any
 
 # ==========================================
-# 1. 敲定严谨的数据契约 (防腐层)
+# 1. 废除严格数据契约，改为动态接收 (已删除 GatewayPayload)
 # ==========================================
-class GatewayPayload(BaseModel):
-    device_id: str
-    timestamp: int
-    payload: Dict[str, Any]  # 接收任意键值对的传感器数据
 
 # ==========================================
-# 2. 建立机机鉴权机制
+# 2. 建立机机鉴权机制 (完美保持不变)
 # ==========================================
-# 定义专属的 HTTP Header 校验规则
 api_key_header = APIKeyHeader(name="X-Gateway-Token", auto_error=False)
 
 def verify_gateway_token(api_key: str = Security(api_key_header)):
-    # 设定一个合法的网关测试密钥
     VALID_TOKEN = "secret-key-123"
-    
     if api_key != VALID_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -34,23 +26,30 @@ def verify_gateway_token(api_key: str = Security(api_key_header)):
 router = APIRouter()
 
 # ==========================================
-# 4. 实现最简化的接收逻辑
+# 4. 实现“照单全收”的动态接收逻辑
 # ==========================================
 @router.post("/upload")
 async def receive_gateway_data(
-    data: GatewayPayload, 
-    token: str = Security(verify_gateway_token) # 注入独立鉴权
+    # 【核心魔法】：直接声明接收一个字典，Body(...) 告诉 FastAPI 去请求体里抓取全部 JSON
+    data: Dict[str, Any] = Body(...),
+    token: str = Security(verify_gateway_token)
 ):
     """
-    专门接收物理网关推送的 JSON 数据
+    专门接收物理网关推送的任意格式 JSON 数据
     """
+    # 尝试提取基础字段用于打印，如果硬件没传 device_id，也不会报错，只会显示"未知设备"
+    device_id = data.get("device_id", "未知设备")
+    
     # 打印到控制台，肉眼确认数据已成功接住
     print("=" * 40)
-    print(f"✅ 成功接收到网关数据!")
-    print(f"设备 ID: {data.device_id}")
-    print(f"时间戳: {data.timestamp}")
-    print(f"核心数据: {data.payload}")
+    print(f"✅ 成功接收到动态网关数据!")
+    print(f"📍 提取设备 ID: {device_id}")
+    print(f"📦 完整原始报文: {data}")
     print("=" * 40)
     
-    # 立即返回 200 OK，不阻塞网关
-    return {"status": "success", "message": "Data received safely"}
+    # 立即返回 200 OK，顺便把收到的“键名”返回给硬件，方便他们联调核对
+    return {
+        "status": "success", 
+        "message": "Dynamic data received safely",
+        "received_fields": list(data.keys()) 
+    }
