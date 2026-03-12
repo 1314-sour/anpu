@@ -64,14 +64,24 @@ class DeviceDriverResponse(DeviceDriverBase):
 # ========== 设备变量 ==========
 class DeviceVariableBase(BaseModel):
     var_name: str
-    slave_address: int
-    data_type: str
-    register_type: str
-    read_write: str
-    address: str
+    description: str = ''
+    variable_type: str = 'device'
+    slave_address: Optional[int] = 0
+    data_type: str = 'UINT16'
+    register_type: Optional[str] = 'holding_register'
+    read_write: str = 'read'
+    address: Optional[str] = ''
     key_name: str = ''
+    driver_id: Optional[int] = None
     driver_name: str = ''
-    collect_mode: str = '非边缘采集'
+    cycle_collect: int = 1
+    collect_interval: int = 1000
+    collect_mode: str = '周期采集'
+    unit: str = ''
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    default_value: str = ''
+    expression: str = ''
     sort_order: int = 0
 
 

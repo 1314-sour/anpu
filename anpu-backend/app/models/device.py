@@ -93,6 +93,7 @@ class DeviceDriver(Base):
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
     device = relationship("Device", back_populates="drivers")
+    variables = relationship("DeviceVariable", back_populates="driver", foreign_keys="DeviceVariable.driver_id")
 
 
 class DeviceVariable(Base):
@@ -101,19 +102,30 @@ class DeviceVariable(Base):
     id = Column(Integer, primary_key=True, index=True)
     device_id = Column(Integer, ForeignKey("devices.id"), nullable=False, index=True)
     var_name = Column(String(100), nullable=False)
-    slave_address = Column(Integer, nullable=False)
-    data_type = Column(String(50), nullable=False)
-    register_type = Column(String(50), nullable=False)
-    read_write = Column(String(20), nullable=False)
-    address = Column(String(50), nullable=False)
+    description = Column(String(255), default='')
+    variable_type = Column(String(20), default='device')  # device / middle / internal
+    slave_address = Column(Integer, nullable=True, default=0)
+    data_type = Column(String(50), nullable=False, default='UINT16')
+    register_type = Column(String(50), nullable=True, default='holding_register')
+    read_write = Column(String(20), nullable=False, default='read')
+    address = Column(String(50), nullable=True, default='')
     key_name = Column(String(50), default='')
+    driver_id = Column(Integer, ForeignKey("device_drivers.id"), nullable=True)
     driver_name = Column(String(100), default='')
-    collect_mode = Column(String(50), default='非边缘采集')
+    cycle_collect = Column(Integer, default=1)  # 1=开启 0=关闭
+    collect_interval = Column(Integer, default=1000)  # 采集周期 ms
+    collect_mode = Column(String(50), default='周期采集')
+    unit = Column(String(20), default='')
+    min_value = Column(DECIMAL(15, 4), nullable=True)
+    max_value = Column(DECIMAL(15, 4), nullable=True)
+    default_value = Column(String(100), default='')
+    expression = Column(String(500), default='')
     sort_order = Column(Integer, default=0)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 
     device = relationship("Device", back_populates="variables")
+    driver = relationship("DeviceDriver", back_populates="variables", foreign_keys=[driver_id])
 
 
 class DeviceReport(Base):

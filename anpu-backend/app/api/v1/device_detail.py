@@ -177,24 +177,43 @@ async def get_device_variables(
     query = db.query(DeviceVariable).filter(DeviceVariable.device_id == device_id)
     query = query.order_by(DeviceVariable.sort_order.desc(), DeviceVariable.id)
     
+    total = query.count()
     offset = (page - 1) * page_size
     variables = query.offset(offset).limit(page_size).all()
-    total = query.count()
     
-    return success_response(data=[{
-        "id": v.id,
-        "device_id": v.device_id,
-        "var_name": v.var_name,
-        "slave_address": v.slave_address,
-        "data_type": v.data_type,
-        "register_type": v.register_type,
-        "read_write": v.read_write,
-        "address": v.address,
-        "key_name": v.key_name,
-        "driver_name": v.driver_name,
-        "collect_mode": v.collect_mode,
-        "sort_order": v.sort_order
-    } for v in variables])
+    items = []
+    for v in variables:
+        driver_display = v.driver_name or ''
+        if v.driver_id and not driver_display:
+            drv = db.query(DeviceDriver).filter(DeviceDriver.id == v.driver_id).first()
+            if drv:
+                driver_display = drv.driver_name
+        items.append({
+            "id": v.id,
+            "device_id": v.device_id,
+            "var_name": v.var_name,
+            "description": getattr(v, 'description', ''),
+            "variable_type": getattr(v, 'variable_type', 'device'),
+            "slave_address": v.slave_address,
+            "data_type": v.data_type,
+            "register_type": v.register_type,
+            "read_write": v.read_write,
+            "address": v.address,
+            "key_name": v.key_name,
+            "driver_id": getattr(v, 'driver_id', None),
+            "driver_name": driver_display,
+            "cycle_collect": getattr(v, 'cycle_collect', 1),
+            "collect_interval": getattr(v, 'collect_interval', 1000),
+            "collect_mode": v.collect_mode,
+            "unit": getattr(v, 'unit', ''),
+            "min_value": float(v.min_value) if getattr(v, 'min_value', None) is not None else None,
+            "max_value": float(v.max_value) if getattr(v, 'max_value', None) is not None else None,
+            "default_value": getattr(v, 'default_value', ''),
+            "expression": getattr(v, 'expression', ''),
+            "sort_order": v.sort_order
+        })
+
+    return success_response(data={"items": items, "total": total})
 
 
 @router.post("/{device_id}/variables", response_model=DeviceVariableResponse)
