@@ -49,6 +49,13 @@
       <el-table-column prop="dataTypeLabel" label="数据类型" min-width="120"></el-table-column>
       <el-table-column prop="registerTypeLabel" label="寄存器类型" min-width="120"></el-table-column>
       <el-table-column prop="readWriteLabel" label="读写类型" min-width="100"></el-table-column>
+      <el-table-column label="实时数据" min-width="120" align="center">
+        <template slot-scope="scope">
+          <strong style="color: #409EFF; font-size: 16px;">
+            {{ scope.row.currentValue }}
+          </strong>
+        </template>
+      </el-table-column>
       <el-table-column prop="cycleCollectLabel" label="周期采集" min-width="100">
         <template slot-scope="scope">
           <el-tag :type="scope.row.cycleCollect === 'on' ? 'success' : 'info'" size="mini">
@@ -191,10 +198,12 @@ export default {
   name: 'VariablesManage',
   props: {
     deviceId: Number,
-    mode: String
+    mode: String,
+    gatewaySn: String
   },
   data() {
     return {
+      ws: null,
       loading: false,
       submitLoading: false,
       variableList: [],
@@ -272,6 +281,14 @@ export default {
   created() {
     this.initPage()
   },
+  mounted() {
+    this.initWebSocket() // 页面挂载后去连 WebSocket
+  },
+  beforeDestroy() {
+    if (this.ws) {
+      this.ws.close() // 离开页面时掐断连接，防止内存泄漏
+    }
+  },
   methods: {
     async initPage() {
       await Promise.all([this.fetchDrivers(), this.fetchVariables()])
@@ -303,7 +320,8 @@ export default {
         driverId,
         driverName,
         variableType,
-        variableTypeLabel: this.getLabelByValue(this.variableTypeOptions, variableType)
+        variableTypeLabel: this.getLabelByValue(this.variableTypeOptions, variableType),
+        currentValue: '--'
       }
     },
     async fetchDrivers() {
@@ -527,6 +545,45 @@ export default {
     },
     goBack() {
       this.$router.back()
+    },
+    initWebSocket() {
+      // 注意：这里连接的是你 Docker 部署的 Nginx 地址
+      this.ws = new WebSocket('ws://127.0.0.1/api/v1/gateway/ws')
+
+      this.ws.onmessage = (event) => {
+        try {
+          const incomingData = JSON.parse(event.data)
+          
+          // 1. 解构提取网关编号和具体的传感器数据
+          const { gateway_sn, ...variableData } = incomingData
+
+          // 2. 寻址拦截：只有发来的 SN 跟当前页面绑定的 SN 一致才处理
+          if (gateway_sn === this.gatewaySn) {
+            
+            // 3. 动态映射与上下对齐
+            // 遍历我们表格的底层数据源 variableList
+            this.variableList.forEach(row => {
+              // 策略 A：按“变量名称”匹配（假设后端发 {"温度1": 25}）
+              if (variableData[row.name] !== undefined) {
+                row.currentValue = variableData[row.name]
+              }
+              // 策略 B：按“寄存器地址”匹配（假设后端发 {"40001": 25.5}）
+              else if (variableData[row.registerAddress] !== undefined) {
+                row.currentValue = variableData[row.registerAddress]
+              }
+            })
+            
+            // 强制刷新当前页面的数据映射
+            this.applySearchAndPagination()
+          }
+        } catch (error) {
+          console.error("解析 WebSocket 数据失败:", error)
+        }
+      }
+
+      this.ws.onerror = () => {
+        console.error('网关实时数据通道连接失败')
+      }
     }
   }
 }
