@@ -31,6 +31,7 @@
           v-if="deviceId" 
           :device-id="deviceId" 
           :mode="mode" 
+          :gateway-sn="gatewaySn"
           @next="handleNext"
         />
       </el-tab-pane>
@@ -75,6 +76,7 @@ export default {
     return {
       mode: 'edit', // 'edit' 或 'create'
       deviceId: null,
+      gatewaySn: '',
       currentTab: 'basic',
       completedTabs: [], // 新增模式下已完成的Tab
       tabs: ['basic', 'drivers', 'variables', 'reports', 'alarms']
@@ -84,6 +86,7 @@ export default {
     const { id, mode } = this.$route.query
     this.mode = mode || 'edit'
     this.deviceId = id ? parseInt(id) : null
+    this.gatewaySn = sn || ''
     
     if (this.mode === 'edit' && !this.deviceId) {
       this.$message.error('缺少设备ID')
