@@ -83,7 +83,7 @@ export default {
     }
   },
   created() {
-    const { id, mode } = this.$route.query
+    const { id, mode, sn } = this.$route.query
     this.mode = mode || 'edit'
     this.deviceId = id ? parseInt(id) : null
     this.gatewaySn = sn || ''
