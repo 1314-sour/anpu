@@ -22,6 +22,11 @@
         <el-input v-model="form.name" placeholder="请输入设备名称"></el-input>
         <div class="error-tip" v-if="showNameError">请输入设备名称</div>
       </el-form-item>
+
+      <!-- 网关SN编号 -->
+      <el-form-item label="网关SN编号：" prop="sn" :required="mode === 'create'">
+        <el-input v-model="form.sn" placeholder="请输入网关SN编号"></el-input>
+      </el-form-item>
       
       <!-- 所属分组 -->
       <el-form-item label="所属分组：">
@@ -193,6 +198,14 @@ export default {
     }
   },
   data() {
+    const validateSn = (rule, value, callback) => {
+      if (this.mode === 'create' && (!value || !String(value).trim())) {
+        callback(new Error('请输入网关SN编号'))
+        return
+      }
+      callback()
+    }
+
    return {
       loading: false,
       showMoreFields: false,
@@ -226,7 +239,8 @@ export default {
         iccid: ''
       },
       rules: {
-        name: [{ required: true, message: '请输入设备名称', trigger: 'blur' }]
+        name: [{ required: true, message: '请输入设备名称', trigger: 'blur' }],
+        sn: [{ validator: validateSn, trigger: 'blur' }]
       }
     }
   },
@@ -303,9 +317,10 @@ export default {
           // 准备要提交的数据，确保数据类型正确
           const submitData = {
             ...this.form,
+            sn: (this.form.sn || '').trim(),
             latitude: this.form.latitude ? parseFloat(this.form.latitude) : null,
             longitude: this.form.longitude ? parseFloat(this.form.longitude) : null,
-            sort: this.form.sort ? parseInt(this.form.sort) : 0,
+            sort: this.form.sort ? parseInt(this.form.sort, 10) : 0,
             // 日期字段：空字符串转为null
             manufacture_date: this.form.manufacture_date || null,
             install_date: this.form.install_date || null

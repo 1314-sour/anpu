@@ -512,21 +512,34 @@ export default {
       }
     },
     submitImport() {
-      this.$refs.importForm.validate((valid) => {
-        if (valid) {
-          const loading = this.$loading({
-            lock: true,
-            text: '正在导入设备...',
-            spinner: 'el-icon-loading',
-            background: 'rgba(0, 0, 0, 0.7)'
-          })
-          
-          setTimeout(() => {
-            loading.close()
-            this.$message.success('设备导入成功')
-            this.importDialogVisible = false
-            this.fetchDeviceList()
-          }, 1500)
+      this.$refs.importForm.validate(async (valid) => {
+        if (!valid) return
+
+        const loading = this.$loading({
+          lock: true,
+          text: '正在导入设备...',
+          spinner: 'el-icon-loading',
+          background: 'rgba(0, 0, 0, 0.7)'
+        })
+
+        try {
+          const parsedSort = parseInt(this.importForm.sort, 10)
+          const payload = {
+            name: (this.importForm.name || '').trim(),
+            sn: (this.importForm.sn || '').trim(),
+            status: 'offline',
+            sort: Number.isNaN(parsedSort) ? 0 : parsedSort
+          }
+
+          await createDevice(payload)
+          this.$message.success('设备导入成功')
+          this.importDialogVisible = false
+          this.fetchDeviceList()
+        } catch (error) {
+          console.error('导入设备失败:', error)
+          this.$message.error(error.response?.data?.detail || '导入失败')
+        } finally {
+          loading.close()
         }
       })
     },
