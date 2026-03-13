@@ -320,7 +320,7 @@ export default {
         driverId,
         driverName,
         variableType,
-        variableTypeLabel: this.getLabelByValue(this.variableTypeOptions, variableType)
+        variableTypeLabel: this.getLabelByValue(this.variableTypeOptions, variableType),
         currentValue: '--'
       }
     },
