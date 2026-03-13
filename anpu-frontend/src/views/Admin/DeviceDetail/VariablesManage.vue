@@ -198,7 +198,7 @@ export default {
   name: 'VariablesManage',
   props: {
     deviceId: Number,
-    mode: String
+    mode: String,
     gatewaySn: String
   },
   data() {
