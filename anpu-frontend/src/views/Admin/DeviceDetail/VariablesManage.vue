@@ -548,7 +548,7 @@ export default {
     },
     initWebSocket() {
       // 注意：这里连接的是你 Docker 部署的 Nginx 地址
-      this.ws = new WebSocket('ws://127.0.0.1/api/v1/gateway/ws')
+      this.ws = new WebSocket('ws://127.0.0.1:8080/api/v1/gateway/ws')
 
       this.ws.onmessage = (event) => {
         try {
