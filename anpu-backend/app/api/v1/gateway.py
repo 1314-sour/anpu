@@ -32,6 +32,8 @@ api_key_header = APIKeyHeader(name="X-Gateway-Token", auto_error=False)
 
 def verify_gateway_token(api_key: str = Security(api_key_header)):
     VALID_TOKEN = "secret-key-123"
+    cleaned = api_key.strip() if api_key else api_key
+    print("RAW =", repr(api_key), "CLEANED =", repr(cleaned))
     if api_key != VALID_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
