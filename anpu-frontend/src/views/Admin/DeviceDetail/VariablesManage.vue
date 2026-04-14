@@ -204,6 +204,7 @@ export default {
   data() {
     return {
       ws: null,
+      heartbeatTimer: null,
       loading: false,
       submitLoading: false,
       variableList: [],
@@ -284,11 +285,17 @@ export default {
   mounted() {
     this.initWebSocket() // 页面挂载后去连 WebSocket
   },
-  beforeDestroy() {
-    if (this.ws) {
-      this.ws.close() // 离开页面时掐断连接，防止内存泄漏
-    }
-  },
+beforeDestroy() {
+  if (this.heartbeatTimer) {
+    clearInterval(this.heartbeatTimer)
+    this.heartbeatTimer = null
+  }
+
+  if (this.ws) {
+    this.ws.close()
+    this.ws = null
+  }
+},
   methods: {
     async initPage() {
       await Promise.all([this.fetchDrivers(), this.fetchVariables()])
@@ -547,42 +554,74 @@ export default {
       this.$router.back()
     },
     initWebSocket() {
-      // 注意：这里连接的是你 Docker 部署的 Nginx 地址
-      this.ws = new WebSocket('ws://127.0.0.1:8080/api/v1/gateway/ws')
+      // 根据当前页面协议自动选择 ws / wss
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      const wsUrl = `${protocol}://${window.location.host}/api/v1/gateway/ws`
+
+      this.ws = new WebSocket(wsUrl)
+
+      this.ws.onopen = () => {
+        console.log('网关实时数据通道已连接')
+
+        // 心跳，避免后端 websocket.receive_text() 长时间收不到消息
+        this.heartbeatTimer = setInterval(() => {
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send('ping')
+          }
+        }, 30000)
+      }
 
       this.ws.onmessage = (event) => {
         try {
           const incomingData = JSON.parse(event.data)
-          
-          // 1. 解构提取网关编号和具体的传感器数据
-          const { gateway_sn, ...variableData } = incomingData
 
-          // 2. 寻址拦截：只有发来的 SN 跟当前页面绑定的 SN 一致才处理
-          if (gateway_sn === this.gatewaySn) {
-            
-            // 3. 动态映射与上下对齐
-            // 遍历我们表格的底层数据源 variableList
-            this.variableList.forEach(row => {
-              // 策略 A：按“变量名称”匹配（假设后端发 {"温度1": 25}）
-              if (variableData[row.name] !== undefined) {
-                row.currentValue = variableData[row.name]
-              }
-              // 策略 B：按“寄存器地址”匹配（假设后端发 {"40001": 25.5}）
-              else if (variableData[row.registerAddress] !== undefined) {
-                row.currentValue = variableData[row.registerAddress]
+          // 新后端推送格式：
+          // {
+          //   gateway_no: '02502025111700005229',
+          //   device_id: 1,
+          //   variables: [
+          //     { id: 1, value: 19 },
+          //     { id: 2, value: 0 }
+          //   ]
+          // }
+
+          const { gateway_no, variables } = incomingData
+
+          // 1. 只处理当前页面绑定网关编号的数据
+          if (gateway_no !== this.gatewaySn) return
+
+          // 2. 逐条更新实时数据列
+          if (Array.isArray(variables)) {
+            variables.forEach(item => {
+              const row = this.variableList.find(v => String(v.id) === String(item.id))
+              if (row) {
+                row.currentValue = item.value
               }
             })
-            
-            // 强制刷新当前页面的数据映射
+
+            // 刷新分页数据
             this.applySearchAndPagination()
           }
         } catch (error) {
-          console.error("解析 WebSocket 数据失败:", error)
+          console.error('解析 WebSocket 数据失败:', error)
         }
       }
 
-      this.ws.onerror = () => {
-        console.error('网关实时数据通道连接失败')
+      this.ws.onerror = (error) => {
+        console.error('网关实时数据通道连接失败', error)
+      }
+
+      this.ws.onclose = () => {
+        console.warn('WebSocket 已断开，3 秒后自动重连')
+
+        if (this.heartbeatTimer) {
+          clearInterval(this.heartbeatTimer)
+          this.heartbeatTimer = null
+        }
+
+        setTimeout(() => {
+          this.initWebSocket()
+        }, 3000)
       }
     }
   }

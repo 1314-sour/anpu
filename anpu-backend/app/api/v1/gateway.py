@@ -7,6 +7,10 @@ from ...database import get_db
 from ...services.message_parser import parse_hex_data
 from ...models.device import Device
 from ...models.device import DeviceVariable
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from ...database import get_db
+from ...models.device import Device, DeviceVariable
 
 # ==========================================
 # 1. 新增：WebSocket 连接管理器 (广播站)
@@ -48,6 +52,32 @@ def verify_gateway_token(request: Request,api_key: str = Security(api_key_header
         )
     return api_key
 
+
+
+def parse_hex_data(hex_str: str):
+    """
+    解析类似 01030E00130000004600000001000100A225
+    返回 [19, 0, 70, 0, 1, 1, 162]
+    """
+    try:
+        hex_str = hex_str.strip()
+
+        if len(hex_str) < 10:
+            return []
+
+        # 去掉前3字节（地址+功能码+长度）和最后2字节CRC
+        payload = hex_str[6:-4]
+
+        values = []
+        for i in range(0, len(payload), 4):
+            chunk = payload[i:i + 4]
+            if len(chunk) == 4:
+                values.append(int(chunk, 16))
+
+        return values
+    except Exception as e:
+        print("❌ 报文解析失败:", e)
+        return []
 # ==========================================
 # 3. 划定专属的路由路径
 # ==========================================
@@ -69,7 +99,7 @@ async def receive_gateway_data(
     print("📦 完整原始报文:", data)
     print("=" * 40)
 
-    # 1. 取网关编号
+    # 1. 取网关编号和原始报文
     gateway_no = data.get("gateway_no")
     raw_hex = data.get("data")
 
@@ -85,65 +115,54 @@ async def receive_gateway_data(
             "message": "缺少 data"
         }
 
-    # 2. 根据 gateway_no 查设备
+    # 2. 根据 gateway_no 找设备
+    # 这里默认用 Device.sn 存网关编号
     device = db.query(Device).filter(Device.sn == gateway_no).first()
-    # 如果你系统里网关编号存的不是 sn，而是别的字段，比如 address/name，就把这里改掉
 
     if not device:
         return {
             "status": "error",
-            "message": f"未找到与 gateway_no={gateway_no} 绑定的设备"
+            "message": f"未找到与 gateway_no={gateway_no} 对应的设备"
         }
-
-    device_id = device.id
 
     # 3. 查询该设备的变量定义
     variables = (
         db.query(DeviceVariable)
-        .filter(DeviceVariable.device_id == device_id)
+        .filter(DeviceVariable.device_id == device.id)
         .order_by(DeviceVariable.sort_order.desc(), DeviceVariable.id)
         .all()
     )
 
     # 4. 解析报文
     values = parse_hex_data(raw_hex)
-    print("🔍 解析后的寄存器值:", values)
+    print("🔍 解析后的值:", values)
 
-    # 5. 将解析结果按顺序映射到变量字段
-    mapped_variables = []
+    # 5. 只组装前端需要的实时值结构
+    # 前端会按变量 id 对齐已有表格行，只更新 currentValue
+    ws_variables = []
     for i, var in enumerate(variables):
         value = values[i] if i < len(values) else None
-
-        mapped_variables.append({
+        ws_variables.append({
             "id": var.id,
-            "name": var.var_name,
-            "register_address": var.address,
-            "data_type": var.data_type,
-            "register_type": var.register_type,
-            "read_write": var.read_write,
-            "unit": getattr(var, "unit", ""),
             "value": value
         })
 
-    # 6. 组织最终广播数据
+    # 6. 广播给前端
     final_data = {
         "gateway_no": gateway_no,
-        "device_id": device_id,
-        "device_name": device.name,
-        "raw_data": raw_hex,
-        "variables": mapped_variables
+        "device_id": device.id,
+        "variables": ws_variables
     }
 
-    print("🎯 最终推送前端的数据:", final_data)
+    print("🎯 最终广播数据:", final_data)
 
-    # 7. 广播给前端
     await manager.broadcast(final_data)
 
     return {
         "status": "success",
         "message": "网关数据接收并解析成功",
         "gateway_no": gateway_no,
-        "device_id": device_id,
+        "device_id": device.id,
         "received_fields": list(data.keys())
     }
 
