@@ -227,12 +227,12 @@ export default {
       variableForm: {
         name: '',
         registerAddress: '',
-        dataType: 'int16',
-        registerType: 'holding',
-        readWrite: 'read',
-        cycleCollect: 'on',
+        dataType: '',
+        registerType: '',
+        readWrite: '',
+        cycleCollect: '',
         driverId: '',
-        variableType: 'device'
+        variableType: ''
       },
       dataTypeOptions: [
         { label: 'INT16', value: 'int16' },
@@ -263,19 +263,21 @@ export default {
       variableRules: {
         name: [{ required: true, message: '请输入变量名称', trigger: 'blur' }],
         registerAddress: [
-          { required: true, message: '请输入寄存器地址', trigger: 'blur' },
           {
-            pattern: /^\d+$/,
-            message: '寄存器地址必须为非负整数',
+            validator: (rule, value, callback) => {
+              if (!value) {
+                callback()
+                return
+              }
+              if (/^\d+$/.test(value)) {
+                callback()
+                return
+              }
+              callback(new Error('寄存器地址必须为非负整数'))
+            },
             trigger: 'blur'
           }
-        ],
-        dataType: [{ required: true, message: '请选择数据类型', trigger: 'change' }],
-        registerType: [{ required: true, message: '请选择寄存器类型', trigger: 'change' }],
-        readWrite: [{ required: true, message: '请选择读写类型', trigger: 'change' }],
-        cycleCollect: [{ required: true, message: '请选择周期采集', trigger: 'change' }],
-        driverId: [{ required: true, message: '请选择所属驱动', trigger: 'change' }],
-        variableType: [{ required: true, message: '请选择变量类型', trigger: 'change' }]
+        ]
       }
     }
   },
@@ -403,12 +405,12 @@ beforeDestroy() {
       return {
         name: '',
         registerAddress: '',
-        dataType: 'int16',
-        registerType: 'holding',
-        readWrite: 'read',
-        cycleCollect: 'on',
-        driverId: this.drivers[0]?.id || '',
-        variableType: 'device'
+        dataType: '',
+        registerType: '',
+        readWrite: '',
+        cycleCollect: '',
+        driverId: '',
+        variableType: ''
       }
     },
     openCreateDialog() {
@@ -457,19 +459,36 @@ beforeDestroy() {
       })
     },
     buildPayload() {
-      return {
+      const payload = {
         var_name: this.variableForm.name,
-        name: this.variableForm.name,
-        address: Number(this.variableForm.registerAddress),
-        register_address: Number(this.variableForm.registerAddress),
-        data_type: this.variableForm.dataType,
-        register_type: this.variableForm.registerType,
-        read_write: this.variableForm.readWrite,
-        cycle_collect: this.variableForm.cycleCollect === 'on',
-        collect_mode: this.variableForm.cycleCollect,
-        driver_id: this.variableForm.driverId,
-        variable_type: this.variableForm.variableType
+        name: this.variableForm.name
       }
+
+      if (this.variableForm.registerAddress !== '') {
+        payload.address = Number(this.variableForm.registerAddress)
+        payload.register_address = Number(this.variableForm.registerAddress)
+      }
+      if (this.variableForm.dataType) {
+        payload.data_type = this.variableForm.dataType
+      }
+      if (this.variableForm.registerType) {
+        payload.register_type = this.variableForm.registerType
+      }
+      if (this.variableForm.readWrite) {
+        payload.read_write = this.variableForm.readWrite
+      }
+      if (this.variableForm.cycleCollect) {
+        payload.cycle_collect = this.variableForm.cycleCollect === 'on'
+        payload.collect_mode = this.variableForm.cycleCollect
+      }
+      if (this.variableForm.driverId !== '') {
+        payload.driver_id = this.variableForm.driverId
+      }
+      if (this.variableForm.variableType) {
+        payload.variable_type = this.variableForm.variableType
+      }
+
+      return payload
     },
     async handleSubmit() {
       if (!this.deviceId) return
