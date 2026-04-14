@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Security, HTTPException, status, Body, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Security, HTTPException, status, Body, WebSocket, WebSocketDisconnect, Request
 from fastapi.security import APIKeyHeader
 from typing import Dict, Any, List
 
@@ -30,8 +30,11 @@ manager = ConnectionManager()
 # ==========================================
 api_key_header = APIKeyHeader(name="X-Gateway-Token", auto_error=False)
 
-def verify_gateway_token(api_key: str = Security(api_key_header)):
+def verify_gateway_token(request: Request,api_key: str = Security(api_key_header)):
     VALID_TOKEN = "secret-key-123"
+    print("HEADERS =", dict(request.headers))
+    print("RAW api_key =", repr(api_key))
+    print("EXPECTED =", repr(VALID_TOKEN))
     if api_key != VALID_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -49,31 +52,22 @@ router = APIRouter()
 # ==========================================
 @router.post("/upload")
 async def receive_gateway_data(
-    # 【核心魔法】：直接声明接收一个字典，Body(...) 告诉 FastAPI 去请求体里抓取全部 JSON
+    request: Request,
     data: Dict[str, Any] = Body(...),
     token: str = Security(verify_gateway_token)
 ):
-    """
-    专门接收物理网关推送的任意格式 JSON 数据
-    """
-    # 尝试提取基础字段用于打印，如果硬件没传 device_id，也不会报错，只会显示"未知设备"
-    device_id = data.get("device_id", "未知设备")
-    
-    # 打印到控制台，肉眼确认数据已成功接住
+    print("HEADERS =", dict(request.headers))
     print("=" * 40)
-    print(f"✅ 成功接收到动态网关数据!")
-    print(f"📍 提取设备 ID: {device_id}")
-    print(f"📦 完整原始报文: {data}")
+    print("✅ 成功接收到动态网关数据!")
+    print("📦 完整原始报文:", data)
     print("=" * 40)
-    
-    # 【核心新增】：触发 WebSocket 广播！将接到的字典原样推给 Vue 前端
+
     await manager.broadcast(data)
-    
-    # 立即返回 200 OK，顺便把收到的“键名”返回给硬件，方便他们联调核对
+
     return {
-        "status": "success", 
+        "status": "success",
         "message": "Dynamic data received and broadcasted safely",
-        "received_fields": list(data.keys()) 
+        "received_fields": list(data.keys())
     }
 
 # ==========================================
