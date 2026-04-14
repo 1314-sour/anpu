@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { Message } from 'element-ui'
 // 统一的后端 API 地址，默认走 /api 交由 Nginx 反向代理
-export const API_BASE_URL = process.env.VUE_APP_API_BASE_URL || '/api'
+export const API_BASE_URL = '/api'
 
 // 创建axios实例
 const service = axios.create({
