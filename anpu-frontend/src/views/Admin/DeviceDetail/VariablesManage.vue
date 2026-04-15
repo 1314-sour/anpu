@@ -608,12 +608,12 @@ beforeDestroy() {
 
           console.log('当前页面 gatewaySn =', this.gatewaySn)
           console.log('后端推送 gateway_no =', gateway_no)
-          console.log('当前表格变量列表 =', this.variableList.map(v => ({
+          console.log('当前页面变量ID =', this.variableList.map(v => ({
             id: v.id,
             name: v.name || v.var_name,
             currentValue: v.currentValue
           })))
-          console.log('后端推送 variables =', variables)
+          console.log('后端 variables =', variables)
 
           if (gateway_no !== this.gatewaySn) {
             console.log('⏭ 网关编号不匹配，跳过更新')
@@ -627,7 +627,7 @@ beforeDestroy() {
                 console.log(`✅ 更新变量 id=${row.id}, value=${item.value}`)
                 row.currentValue = item.value
               } else {
-                console.log(`❌ 未找到对应变量 id=${item.id}`)
+                console.log(`❌ 未找到变量 id=${item.id}`)
               }
             })
 
