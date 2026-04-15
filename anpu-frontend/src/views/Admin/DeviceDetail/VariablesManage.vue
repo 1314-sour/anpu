@@ -103,10 +103,17 @@
       :close-on-click-modal="false"
       @close="resetDialog"
     >
-      <el-form ref="variableForm" :model="variableForm" :rules="variableRules" label-width="110px" class="variable-form">
+      <el-form
+        ref="variableForm"
+        :model="variableForm"
+        :rules="variableRules"
+        label-width="110px"
+        class="variable-form"
+        hide-required-asterisk
+      >
         <el-row :gutter="16">
           <el-col :span="12">
-            <el-form-item label="名称" prop="name">
+            <el-form-item label="名称" prop="name" class="required-name-item">
               <el-input v-model.trim="variableForm.name" maxlength="60" show-word-limit placeholder="请输入变量名称"></el-input>
             </el-form-item>
           </el-col>
@@ -711,5 +718,11 @@ beforeDestroy() {
 
 .variable-form {
   padding-right: 8px;
+}
+
+.variable-form ::v-deep .required-name-item > .el-form-item__label::before {
+  content: '*';
+  color: #f56c6c;
+  margin-right: 4px;
 }
 </style>
