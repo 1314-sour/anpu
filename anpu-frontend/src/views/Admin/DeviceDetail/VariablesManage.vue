@@ -598,34 +598,39 @@ beforeDestroy() {
       }
 
       this.ws.onmessage = (event) => {
+        console.log('WS收到原始消息:', event.data)
+
         try {
-          const incomingData = JSON.parse(event.data)
+          const msg = JSON.parse(event.data)
+          console.log('WS解析后消息:', msg)
 
-          // 新后端推送格式：
-          // {
-          //   gateway_no: '02502025111700005229',
-          //   device_id: 1,
-          //   variables: [
-          //     { id: 1, value: 19 },
-          //     { id: 2, value: 0 }
-          //   ]
-          // }
+          const { gateway_no, variables } = msg
 
-          const { gateway_no, variables } = incomingData
+          console.log('当前页面 gatewaySn =', this.gatewaySn)
+          console.log('后端推送 gateway_no =', gateway_no)
+          console.log('当前表格变量列表 =', this.variableList.map(v => ({
+            id: v.id,
+            name: v.name || v.var_name,
+            currentValue: v.currentValue
+          })))
+          console.log('后端推送 variables =', variables)
 
-          // 1. 只处理当前页面绑定网关编号的数据
-          if (gateway_no !== this.gatewaySn) return
+          if (gateway_no !== this.gatewaySn) {
+            console.log('⏭ 网关编号不匹配，跳过更新')
+            return
+          }
 
-          // 2. 逐条更新实时数据列
           if (Array.isArray(variables)) {
             variables.forEach(item => {
               const row = this.variableList.find(v => String(v.id) === String(item.id))
               if (row) {
+                console.log(`✅ 更新变量 id=${row.id}, value=${item.value}`)
                 row.currentValue = item.value
+              } else {
+                console.log(`❌ 未找到对应变量 id=${item.id}`)
               }
             })
 
-            // 刷新分页数据
             this.applySearchAndPagination()
           }
         } catch (error) {
