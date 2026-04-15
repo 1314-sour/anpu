@@ -25,6 +25,12 @@ service.interceptors.request.use(
 service.interceptors.response.use(
   response => {
     const res = response.data
+    // 兼容后端两种成功响应格式：
+    // 1. 统一包装格式：{ code: 200, message, data }
+    // 2. 直接返回业务对象/数组
+    if (res && typeof res === 'object' && !Object.prototype.hasOwnProperty.call(res, 'code')) {
+      return res
+    }
     if (res.code !== 200) {
       Message({ message: res.message || '请求失败', type: 'error', duration: 3000 })
       if (res.code === 401 && !response.config.url.includes('/auth/login')) {
