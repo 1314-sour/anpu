@@ -22,6 +22,7 @@
           v-if="deviceId" 
           :device-id="deviceId" 
           :mode="mode" 
+          :gateway-sn="gatewaySn"
           @next="handleNext"
         />
       </el-tab-pane>
@@ -62,6 +63,7 @@ import DriversManage from './DeviceDetail/DriversManage.vue'
 import VariablesManage from './DeviceDetail/VariablesManage.vue'
 import ReportsManage from './DeviceDetail/ReportsManage.vue'
 import AlarmsManage from './DeviceDetail/AlarmsManage.vue'
+import { getDeviceDetail } from '@/api/device'
 
 export default {
   name: 'DeviceDetail',
@@ -83,17 +85,36 @@ export default {
     }
   },
   created() {
-    const { id, mode, sn } = this.$route.query
+    const { id, mode } = this.$route.query
     this.mode = mode || 'edit'
     this.deviceId = id ? parseInt(id) : null
-    this.gatewaySn = sn || ''
     
     if (this.mode === 'edit' && !this.deviceId) {
       this.$message.error('缺少设备ID')
       this.$router.back()
+      return
+    }
+
+    if (this.deviceId) {
+      this.loadGatewaySn()
     }
   },
   methods: {
+    async loadGatewaySn() {
+      if (!this.deviceId) {
+        this.gatewaySn = ''
+        return
+      }
+
+      try {
+        const res = await getDeviceDetail(this.deviceId)
+        this.gatewaySn = (res.data?.sn || '').trim()
+      } catch (error) {
+        console.error('加载网关SN失败:', error)
+        this.gatewaySn = ''
+      }
+    },
+
     // 检查Tab是否禁用
     isTabDisabled(tabName) {
       if (this.mode === 'edit') return false // 编辑模式全部可点击
@@ -135,8 +156,9 @@ export default {
     },
     
     // 设备创建成功回调
-    handleDeviceCreated(deviceId) {
-      this.deviceId = deviceId
+    handleDeviceCreated(payload) {
+      this.deviceId = typeof payload === 'object' ? payload.id : payload
+      this.gatewaySn = typeof payload === 'object' ? (payload.sn || '') : ''
       this.completedTabs.push('basic')
     }
   }

@@ -49,6 +49,19 @@ async def get_device_detail(
             "remark": device_obj.remark,
             "iccid": device_obj.iccid,
             "sort": device_obj.sort,
+            "image_url": device_obj.image_url,
+            "latitude": float(device_obj.latitude) if device_obj.latitude is not None else None,
+            "longitude": float(device_obj.longitude) if device_obj.longitude is not None else None,
+            "coordinate_type": device_obj.coordinate_type,
+            "top_order_unit": device_obj.top_order_unit,
+            "default_value_type": device_obj.default_value_type,
+            "default_value": device_obj.default_value,
+            "device_number": device_obj.device_number,
+            "manufacture_date": device_obj.manufacture_date.strftime("%Y-%m-%d") if device_obj.manufacture_date else None,
+            "install_date": device_obj.install_date.strftime("%Y-%m-%d") if device_obj.install_date else None,
+            "warranty_years": device_obj.warranty_years,
+            "warranty_unit": device_obj.warranty_unit,
+            "manufacturer": device_obj.manufacturer,
             "created_at": device_obj.created_at.strftime("%Y-%m-%d %H:%M:%S") if device_obj.created_at else None,
             "updated_at": device_obj.updated_at.strftime("%Y-%m-%d %H:%M:%S") if device_obj.updated_at else None
         }
@@ -167,21 +180,24 @@ async def create_device(
 ):
     """创建设备"""
     print(f"\n===== 创建设备 =====")
-    print(f"接收到的数据: {device.dict()}")
+    payload = device.dict()
+    payload["sn"] = payload["sn"].strip()
+    print(f"接收到的数据: {payload}")
+
+    if not payload["sn"]:
+        raise HTTPException(status_code=400, detail="网关SN编号不能为空")
     
     # 检查设备名称是否已存在
     existing_name = db.query(Device).filter(Device.name == device.name.strip()).first()
     if existing_name:
         raise HTTPException(status_code=400, detail="该名称已存在，请勿重复添加")
     
-    # 检查SN是否已存在（仅当SN非空时检查）
-    if device.sn and device.sn.strip():
-        existing = db.query(Device).filter(Device.sn == device.sn).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="SN编号已存在")
+    existing = db.query(Device).filter(Device.sn == payload["sn"]).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="SN编号已存在")
     
     new_device = Device(
-        **device.dict(),
+        **payload,
         creator_id=current_user.id
     )
     db.add(new_device)

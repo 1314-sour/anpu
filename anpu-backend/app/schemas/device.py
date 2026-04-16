@@ -53,7 +53,7 @@ class DeviceBase(BaseModel):
 
 class DeviceCreate(BaseModel):
     name: str
-    sn: str = ''  # SN可以为空，在网关绑定时填写
+    sn: str
     status: str = 'offline'
     group_id: Optional[int] = None
     address: str = ''

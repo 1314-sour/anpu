@@ -24,7 +24,7 @@ class Device(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), nullable=False)
-    sn = Column(String(100), unique=True, nullable=True, index=True)
+    sn = Column(String(100), unique=True, nullable=False, index=True)
     status = Column(Enum('online', 'offline'), default='offline')
     group_id = Column(Integer, ForeignKey("device_groups.id"), nullable=True)
     address = Column(String(500), default='')

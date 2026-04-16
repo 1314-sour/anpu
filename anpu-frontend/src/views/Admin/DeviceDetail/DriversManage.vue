@@ -5,12 +5,12 @@
       <div class="section-title">绑定网关</div>
       <div class="warning-tip">
         <i class="el-icon-warning"></i>
-        温馨提示：您还没有绑定网关，绑定网关后可添加驱动
+        温馨提示：网关SN编号以新增设备时绑定的信息为准，此处仅展示，不提供修改入口
       </div>
       
       <el-form :model="gatewayForm" :rules="gatewayRules" ref="gatewayForm" label-width="100px" class="gateway-form">
         <el-form-item label="SN编号：" prop="sn">
-          <el-input v-model="gatewayForm.sn" placeholder="请输入SN编号"></el-input>
+          <el-input v-model="gatewayForm.sn" disabled placeholder="请先在新增设备时绑定网关SN"></el-input>
         </el-form-item>
         
         <el-form-item label="验证码：" prop="code">
@@ -59,7 +59,11 @@ export default {
   name: 'DriversManage',
   props: {
     deviceId: Number,
-    mode: String
+    mode: String,
+    gatewaySn: {
+      type: String,
+      default: ''
+    }
   },
   data() {
     return {
@@ -72,6 +76,14 @@ export default {
       gatewayRules: {
         sn: [{ required: true, message: '请输入SN编号', trigger: 'blur' }],
         code: [{ required: true, message: '请输入验证码', trigger: 'blur' }]
+      }
+    }
+  },
+  watch: {
+    gatewaySn: {
+      immediate: true,
+      handler(value) {
+        this.gatewayForm.sn = value || ''
       }
     }
   },

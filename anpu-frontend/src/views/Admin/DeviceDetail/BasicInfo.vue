@@ -25,7 +25,11 @@
 
       <!-- 网关SN编号 -->
       <el-form-item label="网关SN编号：" prop="sn" :required="mode === 'create'">
-        <el-input v-model="form.sn" placeholder="请输入网关SN编号"></el-input>
+        <el-input
+          v-model="form.sn"
+          :disabled="mode !== 'create'"
+          :placeholder="mode === 'create' ? '请输入网关SN编号' : '网关SN编号仅可在新增设备时绑定'"
+        ></el-input>
       </el-form-item>
       
       <!-- 所属分组 -->
@@ -330,7 +334,10 @@ export default {
             console.log('提交数据:', submitData)
             const deviceRes = await createDevice(submitData)
             currentDeviceId = deviceRes.data.id
-            this.$emit('device-created', currentDeviceId)
+            this.$emit('device-created', {
+              id: currentDeviceId,
+              sn: submitData.sn
+            })
           } else {
             await updateDevice(this.deviceId, submitData)
           }
