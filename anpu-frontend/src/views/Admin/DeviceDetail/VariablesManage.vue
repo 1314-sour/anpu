@@ -624,8 +624,9 @@ beforeDestroy() {
             variables.forEach(item => {
               const row = this.variableList.find(v => String(v.id) === String(item.id))
               if (row) {
+                const displayValue = item.value === null || item.value === undefined ? '--' : item.value
                 console.log(`✅ 更新变量 id=${row.id}, value=${item.value}`)
-                row.currentValue = item.value
+                row.currentValue = displayValue
               } else {
                 console.log(`❌ 未找到变量 id=${item.id}`)
               }
