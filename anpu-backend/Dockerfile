@@ -4,18 +4,13 @@ FROM python:3.10-slim
 # 设置容器内工作目录
 WORKDIR /app
 
-
 # 先复制依赖清单（利用缓存加速）
 COPY requirements.txt .
 
 # 安装依赖 (使用清华源加速)
 # 确保 requirements.txt 里写了 uvicorn
-RUN pip config set global.default-timeout 300
-# 🔥 关键：统一使用阿里云 pip 源
-RUN pip config set global.index-url http://mirrors.aliyun.com/pypi/simple && \
-    pip config set global.trusted-host mirrors.aliyun.com && \
-    pip install --upgrade pip setuptools wheel && \
-    pip install --default-timeout=100 --retries=1 --no-cache-dir -r requirements.txt
+RUN python -m pip install --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.org/simple
 
 # 复制所有代码进去
 COPY . .

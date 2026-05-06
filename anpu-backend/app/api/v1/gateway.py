@@ -1,16 +1,16 @@
 from fastapi import APIRouter, Security, HTTPException, status, Body, WebSocket, WebSocketDisconnect, Request
+from ...core.protocol_map import build_parsed_map
 from fastapi.security import APIKeyHeader
 from typing import Dict, Any, List
 from sqlalchemy.orm import Session
 from fastapi import Depends
 from ...database import get_db
-from ...services.message_parser import parse_hex_data
 from ...models.device import Device
 from ...models.device import DeviceVariable
 from fastapi import Depends
-from sqlalchemy.orm import Session
-from ...database import get_db
-from ...models.device import Device, DeviceVariable
+from ...core.protocol_map import build_parsed_map, NAME_KEY_MAP
+from ...services.variable_value_service import upsert_latest_value
+
 
 # ==========================================
 # 1. 新增：WebSocket 连接管理器 (广播站)
@@ -23,14 +23,22 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
+        print(f"✅ WebSocket已连接，当前连接数: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
+        print(f"🔌 WebSocket已断开，当前连接数: {len(self.active_connections)}")
 
     async def broadcast(self, message: dict):
-        """将接收到的动态字典，直接转化为 JSON 广播给所有打开网页的前端"""
+        print(f"📡 当前前端连接数: {len(self.active_connections)}")
+        print(f"📡 即将广播消息: {message}")
+
         for connection in self.active_connections:
-            await connection.send_json(message)
+            try:
+                await connection.send_json(message)
+                print("✅ 已发送到一个前端连接")
+            except Exception as e:
+                print("❌ 发送失败:", e)
 
 # 实例化广播管理器
 manager = ConnectionManager()
@@ -136,16 +144,60 @@ async def receive_gateway_data(
     # 4. 解析报文
     values = parse_hex_data(raw_hex)
     print("🔍 解析后的值:", values)
+    parsed_map = build_parsed_map(values)
+    print("🧩 协议字段解析结果:", parsed_map)
 
-    # 5. 只组装前端需要的实时值结构
-    # 前端会按变量 id 对齐已有表格行，只更新 currentValue
-    ws_variables = []
-    for i, var in enumerate(variables):
-        value = values[i] if i < len(values) else None
-        ws_variables.append({
-            "id": var.id,
-            "value": value
-        })
+    try:
+        ws_variables = []
+
+        for var in variables:
+            key_name = getattr(var, "key_name", None)
+
+            # 兼容旧变量：如果数据库里没有 key_name，则按变量名称兜底匹配
+            if not key_name:
+                key_name = NAME_KEY_MAP.get((var.var_name or "").strip())
+
+            value = parsed_map.get(key_name) if key_name else None
+            data_quality = "good" if value is not None else "null"
+
+            print(
+                f"变量最新值入库 -> id={var.id}, "
+                f"name={var.var_name}, "
+                f"key_name={key_name}, "
+                f"value={value}, "
+                f"quality={data_quality}"
+            )
+
+            # 写入/更新变量最新值表
+            upsert_latest_value(
+                db=db,
+                device_id=device.id,
+                variable_id=var.id,
+                gateway_no=gateway_no,
+                key_name=key_name,
+                value=value,
+                raw_value=value,
+                raw_data=raw_hex,
+                data_quality=data_quality,
+            )
+
+            # WebSocket 推送给前端的数据
+            ws_variables.append({
+                "id": var.id,
+                "key_name": key_name,
+                "value": value
+            })
+
+        db.commit()
+
+    except Exception as e:
+        db.rollback()
+        print("❌ 变量最新值入库失败:", e)
+
+        return {
+            "status": "error",
+            "message": f"变量最新值入库失败: {str(e)}"
+        }
 
     # 6. 广播给前端
     final_data = {

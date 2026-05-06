@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from ...models.device_variable_value import DeviceVariableLatestValue
 from sqlalchemy.orm import Session
 from typing import List
 from ...database import get_db
@@ -180,6 +181,20 @@ async def get_device_variables(
     total = query.count()
     offset = (page - 1) * page_size
     variables = query.offset(offset).limit(page_size).all()
+    variable_ids = [v.id for v in variables]
+
+    latest_values = []
+    if variable_ids:
+        latest_values = (
+            db.query(DeviceVariableLatestValue)
+            .filter(DeviceVariableLatestValue.variable_id.in_(variable_ids))
+            .all()
+        )
+
+    latest_map = {
+        item.variable_id: item
+        for item in latest_values
+    }
     
     items = []
     for v in variables:
@@ -188,6 +203,8 @@ async def get_device_variables(
             drv = db.query(DeviceDriver).filter(DeviceDriver.id == v.driver_id).first()
             if drv:
                 driver_display = drv.driver_name
+        latest = latest_map.get(v.id)
+
         items.append({
             "id": v.id,
             "device_id": v.device_id,
@@ -210,7 +227,10 @@ async def get_device_variables(
             "max_value": float(v.max_value) if getattr(v, 'max_value', None) is not None else None,
             "default_value": getattr(v, 'default_value', ''),
             "expression": getattr(v, 'expression', ''),
-            "sort_order": v.sort_order
+            "sort_order": v.sort_order,
+            "currentValue": latest.value if latest else None,
+            "latest_updated_at": latest.updated_at.isoformat() if latest and latest.updated_at else None,
+            "data_quality": latest.data_quality if latest else None,
         })
 
     return success_response(data={"items": items, "total": total})

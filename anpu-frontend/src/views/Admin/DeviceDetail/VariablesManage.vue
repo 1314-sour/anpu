@@ -313,17 +313,33 @@ beforeDestroy() {
       const hit = options.find(item => item.value === value)
       return hit ? hit.label : '-'
     },
+    formatCurrentValue(value) {
+      if (value === null || value === undefined || value === '') {
+        return '--'
+      }
+      return value
+    },
     normalizeVariable(item) {
       const cycleCollect = item.cycle_collect === false || item.collect_mode === 'off' || item.cycle_collect === 'off'
         ? 'off'
         : 'on'
+
       const variableType = item.variable_type || 'device'
       const driverId = item.driver_id || item.driverId || ''
       const driverName = item.driver_name || item.driverName || this.getDriverName(driverId)
 
+      // 后端变量列表接口返回的最新值
+      // 推荐后端字段叫 currentValue
+      // 这里兼容 current_value，防止后端使用 snake_case
+      const latestValue =
+        item.currentValue !== undefined
+          ? item.currentValue
+          : item.current_value
+
       return {
         id: item.id,
         name: item.var_name || item.name || '',
+        keyName: item.key_name || item.keyName || '',
         registerAddress: String(item.address ?? item.register_address ?? ''),
         dataType: item.data_type || 'int16',
         dataTypeLabel: this.getLabelByValue(this.dataTypeOptions, item.data_type || 'int16'),
@@ -337,7 +353,13 @@ beforeDestroy() {
         driverName,
         variableType,
         variableTypeLabel: this.getLabelByValue(this.variableTypeOptions, variableType),
-        currentValue: '--'
+
+        // 关键修改：优先使用后端返回的最新值
+        currentValue: this.formatCurrentValue(latestValue),
+
+        // 可选：保存最新值更新时间和数据质量，后面页面可展示
+        latestUpdatedAt: item.latest_updated_at || item.latestUpdatedAt || '',
+        dataQuality: item.data_quality || item.dataQuality || ''
       }
     },
     async fetchDrivers() {
@@ -580,7 +602,6 @@ beforeDestroy() {
       this.$router.back()
     },
     initWebSocket() {
-      // 根据当前页面协议自动选择 ws / wss
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
       const wsUrl = `${protocol}://${window.location.host}/api/v1/gateway/ws`
 
@@ -589,7 +610,6 @@ beforeDestroy() {
       this.ws.onopen = () => {
         console.log('网关实时数据通道已连接')
 
-        // 心跳，避免后端 websocket.receive_text() 长时间收不到消息
         this.heartbeatTimer = setInterval(() => {
           if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send('ping')
@@ -604,18 +624,20 @@ beforeDestroy() {
           const msg = JSON.parse(event.data)
           console.log('WS解析后消息:', msg)
 
+          // 后续下行 ack 消息可以单独处理
+          if (msg.type === 'command_ack') {
+            console.log('收到命令执行结果:', msg)
+            return
+          }
+
           const { gateway_no, variables } = msg
 
           console.log('当前页面 gatewaySn =', this.gatewaySn)
           console.log('后端推送 gateway_no =', gateway_no)
-          console.log('当前页面变量ID =', this.variableList.map(v => ({
-            id: v.id,
-            name: v.name || v.var_name,
-            currentValue: v.currentValue
-          })))
           console.log('后端 variables =', variables)
 
-          if (gateway_no !== this.gatewaySn) {
+          // 网关编号不匹配，不更新当前页面
+          if (gateway_no && this.gatewaySn && String(gateway_no) !== String(this.gatewaySn)) {
             console.log('⏭ 网关编号不匹配，跳过更新')
             return
           }
@@ -623,10 +645,15 @@ beforeDestroy() {
           if (Array.isArray(variables)) {
             variables.forEach(item => {
               const row = this.variableList.find(v => String(v.id) === String(item.id))
+
               if (row) {
-                const displayValue = item.value === null || item.value === undefined ? '--' : item.value
-                console.log(`✅ 更新变量 id=${row.id}, value=${item.value}`)
+                const displayValue = this.formatCurrentValue(item.value)
+
+                console.log(`✅ 更新变量 id=${row.id}, value=${displayValue}`)
+
                 row.currentValue = displayValue
+                row.latestUpdatedAt = item.updated_at || item.latest_updated_at || new Date().toISOString()
+                row.dataQuality = item.data_quality || item.dataQuality || (item.value === null || item.value === undefined ? 'null' : 'good')
               } else {
                 console.log(`❌ 未找到变量 id=${item.id}`)
               }
@@ -655,7 +682,7 @@ beforeDestroy() {
           this.initWebSocket()
         }, 3000)
       }
-    }
+    },
   }
 }
 </script>
