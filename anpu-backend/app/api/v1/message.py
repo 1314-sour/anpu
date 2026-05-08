@@ -1,14 +1,18 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
-from datetime import datetime
+from datetime import datetime, timedelta
 from ...database import get_db
 from ...dependencies import get_current_user
 from ...models.user import User
 from ...models.message import Message
+from ...models.device import Device, DeviceVariable
+from ...models.device_variable_value import DeviceVariableLatestValue
 from ...utils.response import success_response
 
 router = APIRouter()
+
+ALARM_MESSAGE_WINDOW_MINUTES = 10
 
 TYPE_MAP = {
     'reserved': '报警消息',
@@ -16,6 +20,75 @@ TYPE_MAP = {
     'expire': '到期提醒',
     'system': '系统公告'
 }
+
+
+def build_alarm_title(device: Device, variable: DeviceVariable, message_type: str):
+    suffix = "变量报警" if message_type == "reserved" else "报警处理工单"
+    return f"{device.name}-{variable.var_name}{suffix}"
+
+
+def has_recent_alarm_message(db: Session, user_id: int, title: str, message_type: str):
+    latest_message = (
+        db.query(Message)
+        .filter(
+            Message.user_id == user_id,
+            Message.type == message_type,
+            Message.title == title,
+        )
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .first()
+    )
+
+    if latest_message is None:
+        return False
+
+    if latest_message.created_at is None:
+        return True
+
+    window_start = datetime.now() - timedelta(minutes=ALARM_MESSAGE_WINDOW_MINUTES)
+    return latest_message.created_at >= window_start
+
+
+def sync_current_alarm_messages(db: Session, current_user: User):
+    """
+    将当前最新值表里的报警状态同步到消息中心。
+    这个补偿用于处理：变量列表已经红色，但报警发生时未生成消息或消息写给其他用户的情况。
+    """
+    alarm_rows = (
+        db.query(Device, DeviceVariable, DeviceVariableLatestValue)
+        .join(DeviceVariable, DeviceVariable.device_id == Device.id)
+        .join(DeviceVariableLatestValue, DeviceVariableLatestValue.variable_id == DeviceVariable.id)
+        .filter(DeviceVariableLatestValue.data_quality == "alarm")
+        .all()
+    )
+
+    created = 0
+    for device, variable, latest in alarm_rows:
+        alarm_title = build_alarm_title(device, variable, "reserved")
+        workorder_title = build_alarm_title(device, variable, "workorder")
+
+        if not has_recent_alarm_message(db, current_user.id, alarm_title, "reserved"):
+            db.add(Message(
+                user_id=current_user.id,
+                title=alarm_title,
+                content="",
+                type="reserved",
+                is_read=False,
+            ))
+            created += 1
+
+        if not has_recent_alarm_message(db, current_user.id, workorder_title, "workorder"):
+            db.add(Message(
+                user_id=current_user.id,
+                title=workorder_title,
+                content="",
+                type="workorder",
+                is_read=False,
+            ))
+            created += 1
+
+    if created:
+        db.commit()
 
 
 @router.get("/list")
@@ -28,6 +101,8 @@ async def get_messages(
     db: Session = Depends(get_db)
 ):
     """获取消息列表"""
+    sync_current_alarm_messages(db, current_user)
+
     query = db.query(Message).filter(Message.user_id == current_user.id)
     
     # 类型筛选

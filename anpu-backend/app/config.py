@@ -1,5 +1,9 @@
 from pydantic_settings import BaseSettings
 from typing import List
+from pathlib import Path
+
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
@@ -28,7 +32,7 @@ class Settings(BaseSettings):
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
     
     class Config:
-        env_file = ".env"
+        env_file = str(BACKEND_DIR / ".env")
         case_sensitive = True
 
 

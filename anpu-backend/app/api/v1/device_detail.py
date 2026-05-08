@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from ...models.device_variable_value import DeviceVariableLatestValue
 from sqlalchemy.orm import Session
-from typing import List
+from sqlalchemy.exc import SQLAlchemyError
+from typing import List, Optional
 from ...database import get_db
 from ...dependencies import get_current_user
 from ...models.user import User
@@ -19,6 +20,73 @@ from ...schemas.device_detail import (
 from ...utils.response import success_response
 
 router = APIRouter(prefix="/device-detail", tags=["设备详情管理"])
+
+
+def serialize_device_variable(variable: DeviceVariable):
+    return {
+        "id": variable.id,
+        "device_id": variable.device_id,
+        "var_name": variable.var_name,
+        "description": getattr(variable, 'description', ''),
+        "variable_type": getattr(variable, 'variable_type', 'device'),
+        "slave_address": variable.slave_address,
+        "data_type": variable.data_type,
+        "register_type": variable.register_type,
+        "read_write": variable.read_write,
+        "address": variable.address,
+        "key_name": variable.key_name,
+        "driver_id": getattr(variable, 'driver_id', None),
+        "driver_name": getattr(variable, 'driver_name', ''),
+        "cycle_collect": getattr(variable, 'cycle_collect', 1),
+        "collect_interval": getattr(variable, 'collect_interval', 1000),
+        "collect_mode": variable.collect_mode,
+        "unit": getattr(variable, 'unit', ''),
+        "min_value": float(variable.min_value) if getattr(variable, 'min_value', None) is not None else None,
+        "max_value": float(variable.max_value) if getattr(variable, 'max_value', None) is not None else None,
+        "default_value": getattr(variable, 'default_value', ''),
+        "expression": getattr(variable, 'expression', ''),
+        "sort_order": variable.sort_order,
+        "created_at": variable.created_at.isoformat() if variable.created_at else None,
+        "updated_at": variable.updated_at.isoformat() if variable.updated_at else None,
+    }
+
+
+def clean_variable_payload(variable_data):
+    payload = variable_data.model_dump()
+    payload.pop("name", None)
+    payload.pop("register_address", None)
+
+    if payload.get("address") is None:
+        payload["address"] = ""
+    else:
+        payload["address"] = str(payload.get("address"))
+
+    if payload.get("slave_address") is None:
+        payload["slave_address"] = 0
+
+    payload["cycle_collect"] = 1 if payload.get("cycle_collect") in (True, 1, "1", "on", "true", "True") else 0
+
+    if payload.get("read_write") == "read":
+        payload["min_value"] = None
+        payload["max_value"] = None
+        payload["default_value"] = ""
+    return payload
+
+
+def serialize_latest_value(latest: Optional[DeviceVariableLatestValue]):
+    value = latest.value if latest else None
+    data_quality = latest.data_quality if latest else None
+    updated_at = latest.updated_at.isoformat() if latest and latest.updated_at else None
+
+    return {
+        "currentValue": value,
+        "current_value": value,
+        "latest_value": value,
+        "latest_updated_at": updated_at,
+        "data_quality": data_quality,
+        "is_alarm": data_quality == "alarm",
+        "raw_value": latest.raw_value if latest else None,
+    }
 
 
 # ========== 设备详细配置 ==========
@@ -205,7 +273,7 @@ async def get_device_variables(
                 driver_display = drv.driver_name
         latest = latest_map.get(v.id)
 
-        items.append({
+        item = {
             "id": v.id,
             "device_id": v.device_id,
             "var_name": v.var_name,
@@ -228,15 +296,14 @@ async def get_device_variables(
             "default_value": getattr(v, 'default_value', ''),
             "expression": getattr(v, 'expression', ''),
             "sort_order": v.sort_order,
-            "currentValue": latest.value if latest else None,
-            "latest_updated_at": latest.updated_at.isoformat() if latest and latest.updated_at else None,
-            "data_quality": latest.data_quality if latest else None,
-        })
+        }
+        item.update(serialize_latest_value(latest))
+        items.append(item)
 
     return success_response(data={"items": items, "total": total})
 
 
-@router.post("/{device_id}/variables", response_model=DeviceVariableResponse)
+@router.post("/{device_id}/variables")
 async def create_device_variable(
     device_id: int,
     variable_data: DeviceVariableCreate,
@@ -248,11 +315,15 @@ async def create_device_variable(
     if not device:
         raise HTTPException(status_code=404, detail="设备不存在")
     
-    variable = DeviceVariable(device_id=device_id, **variable_data.model_dump())
-    db.add(variable)
-    db.commit()
-    db.refresh(variable)
-    return variable
+    try:
+        variable = DeviceVariable(device_id=device_id, **clean_variable_payload(variable_data))
+        db.add(variable)
+        db.commit()
+        db.refresh(variable)
+        return success_response(data=serialize_device_variable(variable), message="变量创建成功")
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"变量创建失败: {str(e.__cause__ or e)}")
 
 
 @router.post("/{device_id}/variables/batch")
@@ -277,7 +348,7 @@ async def batch_create_variables(
     return {"code": 200, "message": f"成功创建{len(variables)}个变量"}
 
 
-@router.put("/{device_id}/variables/{variable_id}", response_model=DeviceVariableResponse)
+@router.put("/{device_id}/variables/{variable_id}")
 async def update_device_variable(
     device_id: int,
     variable_id: int,
@@ -293,12 +364,22 @@ async def update_device_variable(
     if not variable:
         raise HTTPException(status_code=404, detail="变量不存在")
     
-    for key, value in variable_data.model_dump().items():
-        setattr(variable, key, value)
-    
-    db.commit()
-    db.refresh(variable)
-    return variable
+    try:
+        old_address = variable.address
+        for key, value in clean_variable_payload(variable_data).items():
+            setattr(variable, key, value)
+
+        if str(old_address or '') != str(variable.address or ''):
+            db.query(DeviceVariableLatestValue).filter(
+                DeviceVariableLatestValue.variable_id == variable.id
+            ).delete(synchronize_session=False)
+
+        db.commit()
+        db.refresh(variable)
+        return success_response(data=serialize_device_variable(variable), message="变量更新成功")
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"变量更新失败: {str(e.__cause__ or e)}")
 
 
 @router.delete("/{device_id}/variables")
@@ -309,6 +390,17 @@ async def batch_delete_variables(
     db: Session = Depends(get_db)
 ):
     """批量删除设备变量"""
+    variables_to_delete = db.query(DeviceVariable.id).filter(
+        DeviceVariable.device_id == device_id,
+        DeviceVariable.id.in_(delete_data.ids)
+    ).all()
+    variable_ids = [item.id for item in variables_to_delete]
+
+    if variable_ids:
+        db.query(DeviceVariableLatestValue).filter(
+            DeviceVariableLatestValue.variable_id.in_(variable_ids)
+        ).delete(synchronize_session=False)
+
     deleted = db.query(DeviceVariable).filter(
         DeviceVariable.device_id == device_id,
         DeviceVariable.id.in_(delete_data.ids)

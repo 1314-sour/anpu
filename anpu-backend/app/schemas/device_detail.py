@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime
 
@@ -63,6 +63,8 @@ class DeviceDriverResponse(DeviceDriverBase):
 
 # ========== 设备变量 ==========
 class DeviceVariableBase(BaseModel):
+    model_config = ConfigDict(validate_default=True)
+
     var_name: str
     description: str = ''
     variable_type: str = 'device'
@@ -83,6 +85,53 @@ class DeviceVariableBase(BaseModel):
     default_value: str = ''
     expression: str = ''
     sort_order: int = 0
+
+    @field_validator('address', mode='before')
+    @classmethod
+    def validate_address_required(cls, value):
+        if value is None or str(value).strip() == '':
+            raise ValueError('寄存器地址不能为空')
+
+        text = str(value).strip()
+        try:
+            upper_text = text.upper()
+            if upper_text.endswith('H'):
+                parsed = int(upper_text[:-1], 16)
+            elif upper_text.startswith('0X'):
+                parsed = int(upper_text, 16)
+            else:
+                parsed = int(text)
+        except ValueError as exc:
+            raise ValueError('寄存器地址必须是有效整数地址') from exc
+
+        if parsed <= 0:
+            raise ValueError('寄存器地址必须大于0')
+
+        return text
+
+    @field_validator('read_write', mode='before')
+    @classmethod
+    def normalize_read_write(cls, value):
+        read_write_map = {
+            '只读': 'read',
+            '只写': 'write',
+            '读写': 'read_write',
+        }
+        return read_write_map.get(value, value or 'read')
+
+    @model_validator(mode='after')
+    def validate_write_config(self):
+        allowed_read_write = {'read', 'write', 'read_write'}
+        if self.read_write not in allowed_read_write:
+            raise ValueError('读写类型只能是 read、write 或 read_write')
+
+        if self.min_value is not None and self.max_value is not None and self.min_value > self.max_value:
+            raise ValueError('最小值不能大于最大值')
+
+        if self.read_write == 'read':
+            self.default_value = ''
+
+        return self
 
 
 class DeviceVariableCreate(DeviceVariableBase):

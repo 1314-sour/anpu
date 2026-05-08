@@ -49,9 +49,26 @@
       <el-table-column prop="dataTypeLabel" label="数据类型" min-width="120"></el-table-column>
       <el-table-column prop="registerTypeLabel" label="寄存器类型" min-width="120"></el-table-column>
       <el-table-column prop="readWriteLabel" label="读写类型" min-width="100"></el-table-column>
+      <el-table-column label="设定范围" min-width="150" align="center">
+        <template slot-scope="scope">
+          <span v-if="scope.row.isWritable">
+            {{ formatRange(scope.row.minValue, scope.row.maxValue) }}
+          </span>
+          <span v-else class="muted-text">不可写</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="设定值" min-width="120" align="center">
+        <template slot-scope="scope">
+          <span v-if="scope.row.isWritable">{{ formatSettingValue(scope.row.defaultValue) }}</span>
+          <span v-else class="muted-text">--</span>
+        </template>
+      </el-table-column>
       <el-table-column label="实时数据" min-width="120" align="center">
         <template slot-scope="scope">
-          <strong style="color: #409EFF; font-size: 16px;">
+          <strong
+            :class="scope.row.isAlarm ? 'alarm-value' : 'normal-value'"
+            :title="scope.row.alarmMessage"
+          >
             {{ scope.row.currentValue }}
           </strong>
         </template>
@@ -118,7 +135,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="寄存器地址" prop="registerAddress">
+            <el-form-item label="寄存器地址" prop="registerAddress" class="required-address-item">
               <el-input v-model.trim="variableForm.registerAddress" placeholder="例如：40001"></el-input>
             </el-form-item>
           </el-col>
@@ -180,6 +197,27 @@
             </el-form-item>
           </el-col>
         </el-row>
+
+        <el-row v-if="isWritableForm" :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="最小值" prop="minValue">
+              <el-input v-model.trim="variableForm.minValue" placeholder="请输入允许下限"></el-input>
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="最大值" prop="maxValue">
+              <el-input v-model.trim="variableForm.maxValue" placeholder="请输入允许上限"></el-input>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row v-if="isWritableForm" :gutter="16">
+          <el-col :span="12">
+            <el-form-item label="设定值" prop="defaultValue">
+              <el-input v-model.trim="variableForm.defaultValue" placeholder="请输入默认下发值"></el-input>
+            </el-form-item>
+          </el-col>
+        </el-row>
       </el-form>
 
       <span slot="footer" class="dialog-footer">
@@ -214,6 +252,7 @@ export default {
       heartbeatTimer: null,
       loading: false,
       submitLoading: false,
+      notifiedAlarmKeys: new Set(),
       variableList: [],
       filteredList: [],
       pageData: [],
@@ -234,12 +273,15 @@ export default {
       variableForm: {
         name: '',
         registerAddress: '',
-        dataType: '',
-        registerType: '',
-        readWrite: '',
-        cycleCollect: '',
+        dataType: 'int16',
+        registerType: 'holding',
+        readWrite: 'read',
+        cycleCollect: 'on',
         driverId: '',
-        variableType: ''
+        variableType: 'device',
+        minValue: '',
+        maxValue: '',
+        defaultValue: ''
       },
       dataTypeOptions: [
         { label: 'INT16', value: 'int16' },
@@ -273,18 +315,64 @@ export default {
           {
             validator: (rule, value, callback) => {
               if (!value) {
+                callback(new Error('请输入寄存器地址'))
+                return
+              }
+              if (/^\d+$/.test(value) && Number(value) > 0) {
                 callback()
                 return
               }
-              if (/^\d+$/.test(value)) {
-                callback()
-                return
-              }
-              callback(new Error('寄存器地址必须为非负整数'))
+              callback(new Error('寄存器地址必须为大于0的整数'))
             },
             trigger: 'blur'
           }
-        ]
+        ],
+        minValue: [
+          {
+            validator: (rule, value, callback) => {
+              this.validateNumberInput(value, '最小值', callback)
+            },
+            trigger: 'blur'
+          }
+        ],
+        maxValue: [
+          {
+            validator: (rule, value, callback) => {
+              this.validateNumberInput(value, '最大值', callback)
+            },
+            trigger: 'blur'
+          },
+          {
+            validator: (rule, value, callback) => {
+              const minValue = this.variableForm.minValue
+              if (value === '' || minValue === '') {
+                callback()
+                return
+              }
+              if (Number(minValue) <= Number(value)) {
+                callback()
+                return
+              }
+              callback(new Error('最大值不能小于最小值'))
+            },
+            trigger: 'blur'
+          }
+        ],
+        defaultValue: []
+      }
+    }
+  },
+  computed: {
+    isWritableForm() {
+      return this.variableForm.readWrite === 'write' || this.variableForm.readWrite === 'read_write'
+    }
+  },
+  watch: {
+    'variableForm.readWrite'(value) {
+      if (value === 'read') {
+        this.variableForm.minValue = ''
+        this.variableForm.maxValue = ''
+        this.variableForm.defaultValue = ''
       }
     }
   },
@@ -292,6 +380,7 @@ export default {
     this.initPage()
   },
   mounted() {
+    this.prepareDesktopNotification()
     this.initWebSocket() // 页面挂载后去连 WebSocket
   },
 beforeDestroy() {
@@ -313,11 +402,104 @@ beforeDestroy() {
       const hit = options.find(item => item.value === value)
       return hit ? hit.label : '-'
     },
+    validateNumberInput(value, label, callback) {
+      if (value === '' || value === null || value === undefined) {
+        callback()
+        return
+      }
+      if (!Number.isNaN(Number(value))) {
+        callback()
+        return
+      }
+      callback(new Error(`${label}必须为数字`))
+    },
+    isWritable(readWrite) {
+      return readWrite === 'write' || readWrite === 'read_write'
+    },
+    normalizeReadWrite(value) {
+      const legacyMap = {
+        '只读': 'read',
+        '只写': 'write',
+        '读写': 'read_write'
+      }
+      return legacyMap[value] || value || 'read'
+    },
+    formatSettingValue(value) {
+      if (value === null || value === undefined || value === '') {
+        return '--'
+      }
+      return value
+    },
+    formatRange(minValue, maxValue) {
+      const minText = this.formatSettingValue(minValue)
+      const maxText = this.formatSettingValue(maxValue)
+      if (minText === '--' && maxText === '--') {
+        return '--'
+      }
+      return `${minText} ~ ${maxText}`
+    },
     formatCurrentValue(value) {
       if (value === null || value === undefined || value === '') {
         return '--'
       }
       return value
+    },
+    prepareDesktopNotification() {
+      if (!('Notification' in window)) {
+        return
+      }
+      if (Notification.permission === 'default') {
+        const permissionRequest = Notification.requestPermission()
+        if (permissionRequest && typeof permissionRequest.catch === 'function') {
+          permissionRequest.catch(() => {})
+        }
+      }
+    },
+    buildAlarmNotifyKey(row, item) {
+      return `${this.gatewaySn || 'gateway'}:${row.id}:${item.value}`
+    },
+    buildAlarmNotifyMessage(row, item) {
+      const value = this.formatCurrentValue(item.value)
+      return row.alarmMessage || `${row.name} 当前值 ${value} 超出设定范围`
+    },
+    showAlarmNotification(row, item) {
+      const key = this.buildAlarmNotifyKey(row, item)
+      if (this.notifiedAlarmKeys.has(key)) {
+        return
+      }
+      this.notifiedAlarmKeys.add(key)
+
+      const title = '设备变量报警'
+      const message = this.buildAlarmNotifyMessage(row, item)
+
+      if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+        const notification = new Notification(title, {
+          body: message,
+          tag: key,
+          requireInteraction: true
+        })
+        notification.onclick = () => {
+          window.focus()
+          notification.close()
+        }
+        return
+      }
+
+      this.$notify({
+        title,
+        message,
+        type: 'error',
+        position: 'bottom-right',
+        duration: 0
+      })
+    },
+    clearAlarmNotificationState(row) {
+      const prefix = `${this.gatewaySn || 'gateway'}:${row.id}:`
+      Array.from(this.notifiedAlarmKeys).forEach(key => {
+        if (key.startsWith(prefix)) {
+          this.notifiedAlarmKeys.delete(key)
+        }
+      })
     },
     normalizeVariable(item) {
       const cycleCollect = item.cycle_collect === false || item.collect_mode === 'off' || item.cycle_collect === 'off'
@@ -327,6 +509,7 @@ beforeDestroy() {
       const variableType = item.variable_type || 'device'
       const driverId = item.driver_id || item.driverId || ''
       const driverName = item.driver_name || item.driverName || this.getDriverName(driverId)
+      const readWrite = this.normalizeReadWrite(item.read_write)
 
       // 后端变量列表接口返回的最新值
       // 推荐后端字段叫 currentValue
@@ -345,14 +528,20 @@ beforeDestroy() {
         dataTypeLabel: this.getLabelByValue(this.dataTypeOptions, item.data_type || 'int16'),
         registerType: item.register_type || 'holding',
         registerTypeLabel: this.getLabelByValue(this.registerTypeOptions, item.register_type || 'holding'),
-        readWrite: item.read_write || 'read',
-        readWriteLabel: this.getLabelByValue(this.readWriteOptions, item.read_write || 'read'),
+        readWrite,
+        readWriteLabel: this.getLabelByValue(this.readWriteOptions, readWrite),
+        isWritable: this.isWritable(readWrite),
         cycleCollect,
         cycleCollectLabel: cycleCollect === 'on' ? '开启' : '关闭',
         driverId,
         driverName,
         variableType,
         variableTypeLabel: this.getLabelByValue(this.variableTypeOptions, variableType),
+        minValue: item.min_value ?? item.minValue ?? '',
+        maxValue: item.max_value ?? item.maxValue ?? '',
+        defaultValue: item.default_value ?? item.defaultValue ?? '',
+        isAlarm: item.is_alarm || item.isAlarm || item.data_quality === 'alarm',
+        alarmMessage: item.alarm_message || item.alarmMessage || '',
 
         // 关键修改：优先使用后端返回的最新值
         currentValue: this.formatCurrentValue(latestValue),
@@ -434,12 +623,15 @@ beforeDestroy() {
       return {
         name: '',
         registerAddress: '',
-        dataType: '',
-        registerType: '',
-        readWrite: '',
-        cycleCollect: '',
+        dataType: 'int16',
+        registerType: 'holding',
+        readWrite: 'read',
+        cycleCollect: 'on',
         driverId: '',
-        variableType: ''
+        variableType: 'device',
+        minValue: '',
+        maxValue: '',
+        defaultValue: ''
       }
     },
     openCreateDialog() {
@@ -462,7 +654,10 @@ beforeDestroy() {
         readWrite: row.readWrite,
         cycleCollect: row.cycleCollect,
         driverId: row.driverId,
-        variableType: row.variableType
+        variableType: row.variableType,
+        minValue: row.minValue,
+        maxValue: row.maxValue,
+        defaultValue: row.defaultValue
       }
       this.dialogVisible = true
       this.$nextTick(() => {
@@ -480,7 +675,10 @@ beforeDestroy() {
         readWrite: row.readWrite,
         cycleCollect: row.cycleCollect,
         driverId: row.driverId,
-        variableType: row.variableType
+        variableType: row.variableType,
+        minValue: row.minValue,
+        maxValue: row.maxValue,
+        defaultValue: row.defaultValue
       }
       this.dialogVisible = true
       this.$nextTick(() => {
@@ -516,6 +714,11 @@ beforeDestroy() {
       if (this.variableForm.variableType) {
         payload.variable_type = this.variableForm.variableType
       }
+      if (this.isWritable(this.variableForm.readWrite)) {
+        payload.min_value = this.variableForm.minValue === '' ? null : Number(this.variableForm.minValue)
+        payload.max_value = this.variableForm.maxValue === '' ? null : Number(this.variableForm.maxValue)
+        payload.default_value = this.variableForm.defaultValue
+      }
 
       return payload
     },
@@ -538,7 +741,9 @@ beforeDestroy() {
           await this.fetchVariables()
         } catch (error) {
           console.error('保存变量失败:', error)
-          this.$message.error('保存失败，请检查参数后重试')
+          const detail = error.response?.data?.detail
+          console.error('保存变量失败详情:', detail || error.response?.data || error.message)
+          this.$message.error(detail || '保存失败，请检查参数后重试')
         } finally {
           this.submitLoading = false
         }
@@ -648,12 +853,28 @@ beforeDestroy() {
 
               if (row) {
                 const displayValue = this.formatCurrentValue(item.value)
+                const nextQuality = item.data_quality || item.dataQuality
+                const hasAlarmFlag = item.is_alarm !== undefined || item.isAlarm !== undefined
+                const nextIsAlarm = item.is_alarm !== undefined ? item.is_alarm : item.isAlarm
 
                 console.log(`✅ 更新变量 id=${row.id}, value=${displayValue}`)
 
                 row.currentValue = displayValue
                 row.latestUpdatedAt = item.updated_at || item.latest_updated_at || new Date().toISOString()
-                row.dataQuality = item.data_quality || item.dataQuality || (item.value === null || item.value === undefined ? 'null' : 'good')
+                if (nextQuality) {
+                  row.dataQuality = nextQuality
+                }
+                if (hasAlarmFlag) {
+                  row.isAlarm = Boolean(nextIsAlarm)
+                } else if (nextQuality) {
+                  row.isAlarm = nextQuality === 'alarm'
+                }
+                row.alarmMessage = item.alarm_message || item.alarmMessage || row.alarmMessage || ''
+                if (row.isAlarm) {
+                  this.showAlarmNotification(row, item)
+                } else {
+                  this.clearAlarmNotificationState(row)
+                }
               } else {
                 console.log(`❌ 未找到变量 id=${item.id}`)
               }
@@ -719,6 +940,20 @@ beforeDestroy() {
   color: #606266;
 }
 
+.muted-text {
+  color: #909399;
+}
+
+.normal-value {
+  color: #409EFF;
+  font-size: 16px;
+}
+
+.alarm-value {
+  color: #f56c6c;
+  font-size: 16px;
+}
+
 .pagination-wrap {
   display: flex;
   justify-content: space-between;
@@ -753,7 +988,8 @@ beforeDestroy() {
   padding-right: 8px;
 }
 
-.variable-form ::v-deep .required-name-item > .el-form-item__label::before {
+.variable-form ::v-deep .required-name-item > .el-form-item__label::before,
+.variable-form ::v-deep .required-address-item > .el-form-item__label::before {
   content: '*';
   color: #f56c6c;
   margin-right: 4px;
