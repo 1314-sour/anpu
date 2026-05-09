@@ -238,6 +238,7 @@ import {
   batchDeleteVariables,
   getDeviceDrivers
 } from '@/api/deviceDetail'
+import { gatewayAlarmBus } from '@/utils/gatewayAlarmService'
 
 export default {
   name: 'VariablesManage',
@@ -248,11 +249,8 @@ export default {
   },
   data() {
     return {
-      ws: null,
-      heartbeatTimer: null,
       loading: false,
       submitLoading: false,
-      notifiedAlarmKeys: new Set(),
       variableList: [],
       filteredList: [],
       pageData: [],
@@ -380,20 +378,11 @@ export default {
     this.initPage()
   },
   mounted() {
-    this.prepareDesktopNotification()
-    this.initWebSocket() // 页面挂载后去连 WebSocket
+    gatewayAlarmBus.$on('gateway-realtime-message', this.handleRealtimeGatewayMessage)
   },
-beforeDestroy() {
-  if (this.heartbeatTimer) {
-    clearInterval(this.heartbeatTimer)
-    this.heartbeatTimer = null
-  }
-
-  if (this.ws) {
-    this.ws.close()
-    this.ws = null
-  }
-},
+  beforeDestroy() {
+    gatewayAlarmBus.$off('gateway-realtime-message', this.handleRealtimeGatewayMessage)
+  },
   methods: {
     async initPage() {
       await Promise.all([this.fetchDrivers(), this.fetchVariables()])
@@ -443,63 +432,6 @@ beforeDestroy() {
         return '--'
       }
       return value
-    },
-    prepareDesktopNotification() {
-      if (!('Notification' in window)) {
-        return
-      }
-      if (Notification.permission === 'default') {
-        const permissionRequest = Notification.requestPermission()
-        if (permissionRequest && typeof permissionRequest.catch === 'function') {
-          permissionRequest.catch(() => {})
-        }
-      }
-    },
-    buildAlarmNotifyKey(row, item) {
-      return `${this.gatewaySn || 'gateway'}:${row.id}:${item.value}`
-    },
-    buildAlarmNotifyMessage(row, item) {
-      const value = this.formatCurrentValue(item.value)
-      return row.alarmMessage || `${row.name} 当前值 ${value} 超出设定范围`
-    },
-    showAlarmNotification(row, item) {
-      const key = this.buildAlarmNotifyKey(row, item)
-      if (this.notifiedAlarmKeys.has(key)) {
-        return
-      }
-      this.notifiedAlarmKeys.add(key)
-
-      const title = '设备变量报警'
-      const message = this.buildAlarmNotifyMessage(row, item)
-
-      if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-        const notification = new Notification(title, {
-          body: message,
-          tag: key,
-          requireInteraction: true
-        })
-        notification.onclick = () => {
-          window.focus()
-          notification.close()
-        }
-        return
-      }
-
-      this.$notify({
-        title,
-        message,
-        type: 'error',
-        position: 'bottom-right',
-        duration: 0
-      })
-    },
-    clearAlarmNotificationState(row) {
-      const prefix = `${this.gatewaySn || 'gateway'}:${row.id}:`
-      Array.from(this.notifiedAlarmKeys).forEach(key => {
-        if (key.startsWith(prefix)) {
-          this.notifiedAlarmKeys.delete(key)
-        }
-      })
     },
     normalizeVariable(item) {
       const cycleCollect = item.cycle_collect === false || item.collect_mode === 'off' || item.cycle_collect === 'off'
@@ -806,104 +738,47 @@ beforeDestroy() {
     goBack() {
       this.$router.back()
     },
-    initWebSocket() {
-      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      const wsUrl = `${protocol}://${window.location.host}/api/v1/gateway/ws`
-
-      this.ws = new WebSocket(wsUrl)
-
-      this.ws.onopen = () => {
-        console.log('网关实时数据通道已连接')
-
-        this.heartbeatTimer = setInterval(() => {
-          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send('ping')
-          }
-        }, 30000)
+    handleRealtimeGatewayMessage(msg) {
+      if (!msg || msg.type === 'command_ack') {
+        return
       }
 
-      this.ws.onmessage = (event) => {
-        console.log('WS收到原始消息:', event.data)
-
-        try {
-          const msg = JSON.parse(event.data)
-          console.log('WS解析后消息:', msg)
-
-          // 后续下行 ack 消息可以单独处理
-          if (msg.type === 'command_ack') {
-            console.log('收到命令执行结果:', msg)
-            return
-          }
-
-          const { gateway_no, variables } = msg
-
-          console.log('当前页面 gatewaySn =', this.gatewaySn)
-          console.log('后端推送 gateway_no =', gateway_no)
-          console.log('后端 variables =', variables)
-
-          // 网关编号不匹配，不更新当前页面
-          if (gateway_no && this.gatewaySn && String(gateway_no) !== String(this.gatewaySn)) {
-            console.log('⏭ 网关编号不匹配，跳过更新')
-            return
-          }
-
-          if (Array.isArray(variables)) {
-            variables.forEach(item => {
-              const row = this.variableList.find(v => String(v.id) === String(item.id))
-
-              if (row) {
-                const displayValue = this.formatCurrentValue(item.value)
-                const nextQuality = item.data_quality || item.dataQuality
-                const hasAlarmFlag = item.is_alarm !== undefined || item.isAlarm !== undefined
-                const nextIsAlarm = item.is_alarm !== undefined ? item.is_alarm : item.isAlarm
-
-                console.log(`✅ 更新变量 id=${row.id}, value=${displayValue}`)
-
-                row.currentValue = displayValue
-                row.latestUpdatedAt = item.updated_at || item.latest_updated_at || new Date().toISOString()
-                if (nextQuality) {
-                  row.dataQuality = nextQuality
-                }
-                if (hasAlarmFlag) {
-                  row.isAlarm = Boolean(nextIsAlarm)
-                } else if (nextQuality) {
-                  row.isAlarm = nextQuality === 'alarm'
-                }
-                row.alarmMessage = item.alarm_message || item.alarmMessage || row.alarmMessage || ''
-                if (row.isAlarm) {
-                  this.showAlarmNotification(row, item)
-                } else {
-                  this.clearAlarmNotificationState(row)
-                }
-              } else {
-                console.log(`❌ 未找到变量 id=${item.id}`)
-              }
-            })
-
-            this.applySearchAndPagination()
-          }
-        } catch (error) {
-          console.error('解析 WebSocket 数据失败:', error)
-        }
+      const { gateway_no, variables } = msg
+      if (gateway_no && String(gateway_no) !== String(this.gatewaySn)) {
+        return
       }
 
-      this.ws.onerror = (error) => {
-        console.error('网关实时数据通道连接失败', error)
+      if (!Array.isArray(variables)) {
+        return
       }
 
-      this.ws.onclose = () => {
-        console.warn('WebSocket 已断开，3 秒后自动重连')
+      variables.forEach(item => {
+        const row = this.variableList.find(v => String(v.id) === String(item.id))
 
-        if (this.heartbeatTimer) {
-          clearInterval(this.heartbeatTimer)
-          this.heartbeatTimer = null
+        if (!row) {
+          return
         }
 
-        setTimeout(() => {
-          this.initWebSocket()
-        }, 3000)
-      }
-    },
+        const displayValue = this.formatCurrentValue(item.value)
+        const nextQuality = item.data_quality || item.dataQuality
+        const hasAlarmFlag = item.is_alarm !== undefined || item.isAlarm !== undefined
+        const nextIsAlarm = item.is_alarm !== undefined ? item.is_alarm : item.isAlarm
+
+        row.currentValue = displayValue
+        row.latestUpdatedAt = item.updated_at || item.latest_updated_at || new Date().toISOString()
+        if (nextQuality) {
+          row.dataQuality = nextQuality
+        }
+        if (hasAlarmFlag) {
+          row.isAlarm = Boolean(nextIsAlarm)
+        } else if (nextQuality) {
+          row.isAlarm = nextQuality === 'alarm'
+        }
+        row.alarmMessage = item.alarm_message || item.alarmMessage || row.alarmMessage || ''
+      })
+
+      this.applySearchAndPagination()
+    }
   }
 }
 </script>

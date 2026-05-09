@@ -114,7 +114,6 @@ export default {
         this.gatewaySn = ''
       }
     },
-
     // 检查Tab是否禁用
     isTabDisabled(tabName) {
       if (this.mode === 'edit') return false // 编辑模式全部可点击

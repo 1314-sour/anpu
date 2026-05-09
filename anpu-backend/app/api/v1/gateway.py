@@ -219,6 +219,27 @@ def evaluate_range_alarm(var: DeviceVariable, value):
     return False, ""
 
 
+def build_range_text(var: DeviceVariable):
+    min_text = getattr(var, "min_value", None)
+    max_text = getattr(var, "max_value", None)
+    return (
+        f"{min_text if min_text is not None else '-'} ~ "
+        f"{max_text if max_text is not None else '-'}"
+    )
+
+
+def build_alarm_content(device: Device, var: DeviceVariable, value, alarm_message: str):
+    return (
+        f"设备：{device.name}；"
+        f"网关SN：{device.sn}；"
+        f"变量：{var.var_name}；"
+        f"异常值：{value}；"
+        f"设定范围：{build_range_text(var)}；"
+        f"寄存器地址：{getattr(var, 'address', '')}；"
+        f"报警原因：{alarm_message}。"
+    )
+
+
 def build_error_command(
     command_id: str,
     device: Device,
@@ -359,12 +380,13 @@ def create_alarm_messages_if_needed(
     同一变量 10 分钟内只保留一组报警/工单；超过窗口后视为一次新的报警。
     """
     records = []
+    content = build_alarm_content(device, var, value, alarm_message)
 
     if not has_recent_alarm_message(db, device, var, "reserved"):
         alarm_message_record = Message(
             user_id=device.creator_id,
             title=build_alarm_title(device, var, "reserved"),
-            content="",
+            content=content,
             type="reserved",
             is_read=False,
         )
@@ -375,7 +397,7 @@ def create_alarm_messages_if_needed(
         workorder_message_record = Message(
             user_id=device.creator_id,
             title=build_alarm_title(device, var, "workorder"),
-            content="",
+            content=f"请及时处理该设备变量报警。{content}",
             type="workorder",
             is_read=False,
         )
@@ -507,6 +529,11 @@ async def receive_gateway_data(
             # WebSocket 推送给前端的数据
             ws_variables.append({
                 "id": var.id,
+                "device_id": device.id,
+                "device_name": device.name,
+                "gateway_no": gateway_no,
+                "variable_name": var.var_name,
+                "name": var.var_name,
                 "key_name": key_name,
                 "address": getattr(var, "address", None),
                 "value": value,

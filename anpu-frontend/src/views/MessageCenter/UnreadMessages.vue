@@ -167,6 +167,7 @@ export default {
           await deleteMessages([id])
           this.$message.success('删除成功')
           this.loadMessages()
+          this.$store.dispatch('fetchUnreadCount')
         } catch (error) {
           console.error('删除失败:', error)
         }
@@ -181,6 +182,7 @@ export default {
           await deleteMessages(this.selectedMessages.map(m => m.id))
           this.$message.success('删除成功')
           this.loadMessages()
+          this.$store.dispatch('fetchUnreadCount')
         } catch (error) {
           console.error('删除失败:', error)
         }

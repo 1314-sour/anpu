@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from datetime import datetime, timedelta
@@ -25,6 +25,27 @@ TYPE_MAP = {
 def build_alarm_title(device: Device, variable: DeviceVariable, message_type: str):
     suffix = "变量报警" if message_type == "reserved" else "报警处理工单"
     return f"{device.name}-{variable.var_name}{suffix}"
+
+
+def build_range_text(variable: DeviceVariable):
+    min_text = getattr(variable, "min_value", None)
+    max_text = getattr(variable, "max_value", None)
+    return (
+        f"{min_text if min_text is not None else '-'} ~ "
+        f"{max_text if max_text is not None else '-'}"
+    )
+
+
+def build_alarm_content(device: Device, variable: DeviceVariable, latest: DeviceVariableLatestValue):
+    return (
+        f"设备：{device.name}；"
+        f"网关SN：{device.sn}；"
+        f"变量：{variable.var_name}；"
+        f"异常值：{latest.value}；"
+        f"设定范围：{build_range_text(variable)}；"
+        f"寄存器地址：{getattr(variable, 'address', '')}；"
+        f"报警状态：当前变量仍处于异常状态。"
+    )
 
 
 def has_recent_alarm_message(db: Session, user_id: int, title: str, message_type: str):
@@ -66,12 +87,13 @@ def sync_current_alarm_messages(db: Session, current_user: User):
     for device, variable, latest in alarm_rows:
         alarm_title = build_alarm_title(device, variable, "reserved")
         workorder_title = build_alarm_title(device, variable, "workorder")
+        content = build_alarm_content(device, variable, latest)
 
         if not has_recent_alarm_message(db, current_user.id, alarm_title, "reserved"):
             db.add(Message(
                 user_id=current_user.id,
                 title=alarm_title,
-                content="",
+                content=content,
                 type="reserved",
                 is_read=False,
             ))
@@ -81,7 +103,7 @@ def sync_current_alarm_messages(db: Session, current_user: User):
             db.add(Message(
                 user_id=current_user.id,
                 title=workorder_title,
-                content="",
+                content=f"请及时处理该设备变量报警。{content}",
                 type="workorder",
                 is_read=False,
             ))
@@ -101,8 +123,6 @@ async def get_messages(
     db: Session = Depends(get_db)
 ):
     """获取消息列表"""
-    sync_current_alarm_messages(db, current_user)
-
     query = db.query(Message).filter(Message.user_id == current_user.id)
     
     # 类型筛选
@@ -222,9 +242,10 @@ async def mark_unread(
     return success_response(message="标记未读成功")
 
 
+@router.post("/delete")
 @router.delete("/delete")
 async def delete_messages(
-    message_ids: list[int],
+    message_ids: list[int] = Body(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

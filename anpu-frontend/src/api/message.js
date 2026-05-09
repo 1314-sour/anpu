@@ -60,7 +60,7 @@ export function markUnread(message_ids) {
 export function deleteMessages(message_ids) {
   return request({
     url: '/v1/message/delete',
-    method: 'delete',
+    method: 'post',
     data: message_ids
   })
 }
