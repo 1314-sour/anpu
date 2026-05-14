@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     
     # CORS 配置
     CORS_ORIGINS: str = "http://localhost:8080"
+
+    # WeChat official account alarm push
+    WECHAT_MP_ENABLED: bool = False
+    WECHAT_MP_APP_ID: str = ""
+    WECHAT_MP_APP_SECRET: str = ""
+    WECHAT_MP_TEMPLATE_ID: str = ""
+    WECHAT_MP_TO_USER_OPENIDS: str = ""
+    WECHAT_MP_USER_OPENIDS: str = ""
+    WECHAT_MP_TEMPLATE_URL: str = ""
+    WECHAT_MP_TIMEOUT_SECONDS: float = 5.0
     
     @property
     def cors_origins_list(self) -> List[str]:
