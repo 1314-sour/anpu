@@ -13,6 +13,7 @@ from ...models.device_variable_value import DeviceVariableLatestValue
 from ...models.gateway_command import GatewayDownlinkCommand
 from ...models.message import Message
 from ...services.variable_value_service import upsert_latest_value
+from ...services.wechat_mp_service import wechat_mp_service
 
 
 ALARM_MESSAGE_WINDOW_MINUTES = 10
@@ -405,6 +406,29 @@ def create_alarm_messages_if_needed(
         records.append(workorder_message_record)
 
     return records
+
+
+async def push_wechat_alarm_notifications(notifications: List[Dict[str, Any]]):
+    if not notifications:
+        return []
+
+    results = []
+    for notification in notifications:
+        try:
+            send_result = await wechat_mp_service.send_alarm(**notification)
+            results.append({
+                "title": notification.get("title"),
+                "status": "sent" if send_result else "skipped",
+                "result": send_result,
+            })
+        except Exception as e:
+            print("WeChat MP alarm push failed:", e)
+            results.append({
+                "title": notification.get("title"),
+                "status": "failed",
+                "error": str(e),
+            })
+    return results
 # ==========================================
 # 3. 划定专属的路由路径
 # ==========================================
@@ -472,6 +496,7 @@ async def receive_gateway_data(
         skipped_variables = []
         error_commands = []
         alarm_records = []
+        wechat_alarm_notifications = []
 
         for var in variables:
             key_name = get_variable_key_name(var)
@@ -571,6 +596,16 @@ async def receive_gateway_data(
                         "message_title": alarm_record.title,
                         "message_type": alarm_record.type,
                     })
+                    if alarm_record.type == "reserved":
+                        wechat_alarm_notifications.append({
+                            "title": alarm_record.title,
+                            "content": alarm_record.content or "",
+                            "device_name": device.name,
+                            "variable_name": var.var_name,
+                            "value": value,
+                            "alarm_message": alarm_message,
+                            "username": device.creator.username if device.creator else None,
+                        })
                 print(
                     f"下行报警命令{'创建' if command_created else '复用'} -> "
                     f"command_id={command_record.command_id}, variable_id={var.id}"
@@ -593,12 +628,15 @@ async def receive_gateway_data(
         }
 
     # 6. 广播给前端
+    wechat_push_results = await push_wechat_alarm_notifications(wechat_alarm_notifications)
+
     final_data = {
         "gateway_no": gateway_no,
         "device_id": device.id,
         "variables": ws_variables,
         "skipped_variables": skipped_variables,
         "alarm_records": alarm_records,
+        "wechat_push_results": wechat_push_results,
         "commands": error_commands,
         "error_commands": error_commands,
     }
@@ -617,6 +655,7 @@ async def receive_gateway_data(
         "variables": ws_variables,
         "skipped_variables": skipped_variables,
         "alarm_records": alarm_records,
+        "wechat_push_results": wechat_push_results,
         "commands": error_commands,
         "error_commands": error_commands,
     }
